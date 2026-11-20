@@ -1,0 +1,34 @@
+open_rejections: []
+approved: true
+resolved:
+- field: product_type
+  at: 2026-10-07 18:21
+- field: default_date
+  at: 2026-10-13 12:09
+  was: null
+  now: base | Masterdatatape_NBO | Delinquency Date | date_serial
+  unchanged: false
+  note: Raised 2026-10-07 while testing the reject mechanism - the reason given was
+    'second attempt, revised wording', not a defect in the mapping. Delinquency Date
+    reads cleanly as Excel serials (T14), 16,716 of 19,434 filled. Closed by sharlene
+    2026-10-13.
+deal: PT16023
+approved_mappings:
+  borrower_type: base | Masterdatatape_NBO | Type of Client | text
+  client_id: base | Masterdatatape_NBO | Client Number | text
+  cutoff_balance: base | Masterdatatape_NBO | OB (€) | amount
+  cutoff_principal: base | Masterdatatape_NBO | UPB (€) | amount
+  default_date: base | Masterdatatape_NBO | Delinquency Date | date_serial
+  insolvency_start_date: base | Masterdatatape_NBO | Insolvency Date | date_serial
+  insolvent_flag: base | Masterdatatape_NBO | Insolvent? (Y/N) | yn
+  judicialised_flag: base | Masterdatatape_NBO | Judicialized? | yn
+  loan_id: base | Masterdatatape_NBO | COMP_OPER_PROD (Unique Loan ID) | text
+  product_type: base | Masterdatatape_NBO | Product Type | text
+  segment: base | Masterdatatape_NBO | Sub-Portfolio | text
+approved_tape_md5: 7eeb7df9d71e96094307e8970c350592
+approved_output_md5: fc904f5f4c7f6b6c982578cadc3a1c8f
+reviewed_by: sharlene
+reviewed_at: 2026-10-13 12:09
+note: Approved the strats hit as the right quantity and the JUDGEMENT mappings as
+  meaning what they say. PROVEN rows were settled by exact reconciliation and not
+  re-checked.

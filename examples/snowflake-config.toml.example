@@ -1,0 +1,30 @@
+# Copy this to ~/.snowflake/config.toml and change ONE thing: the two
+# `user` lines, to your own Brocc email.
+#
+#     mkdir -p ~/.snowflake
+#     cp examples/snowflake-config.toml.example ~/.snowflake/config.toml
+#     chmod 0600 ~/.snowflake/config.toml     # required, see below
+#     # then edit the two `user` lines
+#
+# There is NO password and NO private key here, on purpose. Brocc uses
+# single sign-on: `authenticator = "externalBrowser"` means Snowflake logs
+# you in through a browser tab, the same way the Snowflake web UI does.
+#
+# chmod 0600 is not optional — the Snowflake client refuses to read a
+# config file that other users on the machine could read.
+
+default_connection_name = "prod"
+
+# Production data. This is the one you want for reading marts.
+[connections.prod]
+account = "brocc-prod"
+user = "CHANGE_ME@brocc.com"
+authenticator = "externalBrowser"
+role = "NPL_ANALYST"
+
+# Sandbox, for scratch work and dbt dev schemas.
+[connections.sandbox]
+account = "brocc-sandbox"
+user = "CHANGE_ME@brocc.com"
+authenticator = "externalBrowser"
+role = "PUBLIC"

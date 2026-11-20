@@ -1,0 +1,23 @@
+open_rejections: []
+deal: PT15020
+approved: true
+approved_mappings:
+  client_id: base | ANEXO_I_DADOS | nif | text
+  cutoff_balance: align | asset-index with interest | Saldo Total | amount
+  cutoff_interest: align | asset-index with interest | Juros (interests) | amount
+  cutoff_principal: align | asset-index with interest | Saldo_Contabilistico | amount
+  default_date: base | ANEXO_I_DADOS | Data_entrada | date
+  judicialised_flag: base | ANEXO_I_DADOS | FaseRecup | part:CON
+  loan_holder_corporate_flag: base | ANEXO_I_DADOS | nif | lead_in:5,6,7,8,9
+  loan_holder_individual_flag: base | ANEXO_I_DADOS | nif | lead_in:1,2,3
+  loan_id: base | ANEXO_I_DADOS | Contrato | text
+  origination_date: base | ANEXO_I_DADOS | Data_Contrato | date
+  product_type: base | ANEXO_I_DADOS | Produto | text
+  segment: base | ANEXO_I_DADOS | FaseRecup | text
+approved_tape_md5: b926eb67ca6ade75da5a2e38b1c81273
+approved_output_md5: f410a75483108b89f832db23db9d096c
+reviewed_by: sharlene
+reviewed_at: 2026-10-13 12:32
+note: Approved the strats hit as the right quantity and the JUDGEMENT mappings as
+  meaning what they say. PROVEN rows were settled by exact reconciliation and not
+  re-checked.

@@ -1,0 +1,76 @@
+# Legal-type columns used in npl-underwriting — France
+#
+# Scraped 2026-10-08 from npl-underwriting/deals/*/**.py and .ipynb.
+# Deal assets are gitignored and absent, so this is what the CODE
+# references, not what every tape actually shipped.
+#
+# ⚠ 'liquidation' is EXCLUDED throughout. In this repo it means the
+#   recovery curve (sum_liquidations, log_liquidation, cumulative
+#   liquidation %), not the insolvency process. Counting it as a legal
+#   term would have made it the top hit in every country.
+
+country: France
+country_code: FR
+deal_count: 1
+legal_term_count: 11
+
+deals:
+  - deal: iqera
+    identified_as: "Iqera"
+    country_basis: "column language (TOTAL_CREANCE, JUDICIAIRE)"
+
+# Enforced by npl_schema.CleanedAccountsSchema / CleanedPaymentsSchema.
+# IDENTICAL IN EVERY COUNTRY — the schema is shared, not per-country.
+mandatory_fields:
+  accounts:
+    - model_id  # unique
+    - registration_date
+    - registration_balance
+    - extraction_date
+  payments:
+    - model_id
+    - payment_date
+    - payment_amount
+
+# Schema-optional fields, and how many of this country's deals name them.
+optional_fields_used:
+  customer_type: 1   # of 1 deals
+  pricing_segment: 1   # of 1 deals
+  product_type: 1   # of 1 deals
+
+# Every legal-type column the code references, with the number of deals
+# in this country that use it. Sorted by count, then name.
+legal_terms:
+  "abo_nom_court":
+    deals: 1
+    used_by: [iqera]
+  "account_legal_claim_status":
+    deals: 1
+    used_by: [iqera]
+  "deceased":
+    deals: 1
+    used_by: [iqera]
+  "enforcement_title_status":
+    deals: 1
+    used_by: [iqera]
+  "insolvency_flag":
+    deals: 1
+    used_by: [iqera]
+  "insolvency_flag_at_registration":
+    deals: 1
+    used_by: [iqera]
+  "judiciaire":
+    deals: 1
+    used_by: [iqera]
+  "judicial":
+    deals: 1
+    used_by: [iqera]
+  "prescribed title":
+    deals: 1
+    used_by: [iqera]
+  "titled":
+    deals: 1
+    used_by: [iqera]
+  "titré prescrit":
+    deals: 1
+    used_by: [iqera]

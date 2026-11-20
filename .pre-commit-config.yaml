@@ -1,0 +1,26 @@
+# Checks that run on every commit. Install once after cloning:  uv run pre-commit install
+# Run by hand on everything:  uv run pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      # Second line of defence behind .gitignore: refuses a data file even if it was
+      # force-added. Seller tapes and query exports never belong in this repo.
+      - id: no-data-files
+        name: no data files (spreadsheets, CSV, parquet, documents, archives)
+        language: fail
+        entry: "Data files must not be committed. Keep them in a gitignored folder."
+        files: '(?i)\.(xlsx|xlsm|xlsb|xls|ods|csv|tsv|parquet|feather|arrow|avro|orc|pkl|pickle|npy|npz|h5|hdf5|db|duckdb|sqlite3?|pdf|docx?|pptx?|potx|msg|eml|zip|gz|7z|rar|tar|html)$'
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+
+# Notebook outputs are stripped by the nbstripout git filter (.gitattributes), not a hook:
+# the filter strips only what gets committed and leaves your local outputs alone, where the
+# pre-commit hook would rewrite the notebook on disk. Run `uv run nbstripout --install` once.

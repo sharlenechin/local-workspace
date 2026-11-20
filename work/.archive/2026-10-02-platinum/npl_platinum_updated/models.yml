@@ -1,0 +1,110 @@
+# ============================================================================
+# NPL PLATINUM (updated). History models, in one vocabulary.
+# ============================================================================
+# Both models answer "who held this, and when" with the same three columns --
+# PHASE_TYPE, PHASE_ENTITY_NAME and a date -- so a portfolio's history and the
+# history of any loan inside it read as one story.
+#
+# ⚠ No servicer is ever named in a phase. PHASE_ENTITY_NAME is resolved per row
+# from the loan's own reporting system, because a book serviced by Gescobro or
+# Cerved would be silently mislabelled by a hard-coded 'INTRUM_' prefix.
+# ============================================================================
+models:
+  - name: dim_npl_portfolio_history
+    description: >
+      PLATINUM (updated). One row per (portfolio_sk, phase_type, phase_entity_sk) -- who held
+      a portfolio, in what capacity, and between which dates. 441 rows: 231 SERVICER and 210
+      LEGAL_BUYER, across 196 portfolios. ⚠⚠ THESE ARE WINDOWS, NOT SPELLS ON A TIMELINE.
+      544 portfolio-months carry two reporting systems AT ONCE, across all 34 portfolios that
+      have more than one, so a single-timeline model interleaves them and reports a handover
+      every month -- an earlier build produced 1,273 spells where only 231 real pairs exist.
+      A second row therefore does NOT mean a transfer happened; IS_CONCURRENT_FLAG separates
+      parallel running from replacement. PHASE_END_DATE is NULL while still active. The window
+      is inferred from which months loans are present, because nothing records a mandate or a
+      transfer date. ⚠ A servicer change creates NEW LOANS, not a new portfolio: case_bk is
+      '<servicer system>-<their case id>', so a transfer leaves portfolio_sk and batch_sk
+      untouched while every case_sk is replaced, with nothing linking old to new.
+    config:
+      alias: dim_npl_portfolio_history
+      tags: npl_platinum_updated
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - portfolio_sk
+              - phase_type
+              - phase_entity_sk
+
+  - name: dim_npl_case_history
+    description: >
+      PLATINUM (updated). One row per (case_bk, phase_type) -- a loan's life told as the
+      moments that matter, with what was true of it AT each moment. ⚠⚠⚠ DENSE: A ROW MEANS
+      SOMETHING HAPPENED. A phase with no date produces NO ROW, not a placeholder full of
+      NULLs, so the number of rows per loan VARIES -- read PHASE_COUNT, never assume six.
+      The catalogue of phases that COULD exist is the phase_list CTE in the model; check it
+      before concluding a loan has no origination. ⚠⚠ THERE IS NO 'LATEST' PHASE. It existed
+      and was removed: it was current state wearing an event's clothes, it forced a FULL
+      REBUILD every run because it moved for every loan every month while real events never
+      change, and it asserted recency by name instead of reading it off the dates.
+      IS_LATEST_PHASE_FLAG derives it instead. ⚠⚠ CONSEQUENCE: the CURRENT balance no longer
+      lives in this model -- only balances AT the recorded events do. Read
+      FCT_NPL_CASE_SNAPSHOT_DAILY for today's figure. ⚠⚠ ONLY REGISTRATION BELONGS TO THE
+      LOAN; LEGACY_ACQUISITION is its batch's date and BROCC_ACQUISITION its portfolio's,
+      repeated onto every loan inside, and PHASE_GRAIN says which. ⚠⚠ Balances exist only
+      where a snapshot does: the case snapshot starts 2014-06-30, so BROCC_ACQUISITION
+      carries one on 73.41% of its rows but REGISTRATION on only 2.61% -- registration
+      usually predates the snapshot entirely. HAS_SNAPSHOT_FLAG marks it.
+      warehouse, so IS_INSOLVENCY_FLAG is a reserved NULL; what IS real and point-in-time is
+      FORBEARANCE, measured at each event. ⚠⚠ CLOSING_DESCRIPTION and CLOSING_CATEGORY
+      are 100% NULL, but CLOSING_CODE is NOT -- it is populated on 9,263,268 of the
+      22,530,117 current loans across 47 distinct codes, undecoded (measured 2026-09-27).
+      ⚠⚠ CASE_STATUS comes from CLOSING_DATE, not from presence on a file: 9,057,528 loans
+      are marked closed yet still reported on one. IS_ON_LATEST_BOOK_FLAG answers that
+      separate question. The 712,534 loans that left every file without ever being marked
+      closed read as OPEN, so an open-loan count is an UPPER BOUND.
+    config:
+      alias: dim_npl_case_history
+      tags: npl_platinum_updated
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - case_bk
+              - phase_type
+    columns:
+      - name: is_latest_phase_flag
+        description: >
+          TRUE on the most recent event held for the loan, derived from PHASE_DATE. This
+          replaced the old 'LATEST' phase -- it marks the newest ACTIVITY and is NOT a
+          current-state snapshot: a loan whose last recorded event was its 2019 registration
+          has THAT row flagged.
+      - name: phase_count
+        description: >
+          How many events this model holds for the loan. ⚠ 1 means the history is a single
+          point -- treat any trend drawn from it with suspicion.
+      - name: source_updated_at
+        description: >
+          When the warehouse last touched the loan's record (DIM_CASE.AS_OF_TS), NOT when the
+          event happened -- PHASE_DATE is that. Use it to spot stale rows and as the watermark
+          for an incremental build.
+      - name: latest_snapshot_day
+        description: >
+          The newest file this loan appeared on. An attribute, not a phase row, because
+          appearing on a file is not an event.
+      - name: phase_entity_type
+        description: >
+          What kind of party PHASE_ENTITY is -- SERVICER, VEHICLE, SELLER or OWNER. Shared
+          with dim_npl_portfolio_history so a filter means the same thing on both tables.
+      - name: phase_system
+        description: >
+          ⚠⚠ The servicer's PLATFORM ('CAT Fenix'), NOT a company. It is part of CASE_BK, so
+          when Intrum migrates a book between its own platforms the same debt is issued a NEW
+          CASE_BK with a NEW registration date and nothing links the two -- 32 portfolios have
+          two registration rows for this reason, covering 12,646,213 of the 19.6m loans that
+          carry a registration date. Those loans appear in TWO vintages. ⚠ Not unique:
+          reporting system codes 7006 and 7010 are both named 'CAT Scale'.
+      - name: phase_entity
+        description: >
+          The party, resolved per row -- the servicer that actually registered the loan, the
+          vehicle that bought it. NEVER hard-coded into the phase name. 5 distinct servicers
+          appear on REGISTRATION and 16 vehicles on BROCC_ACQUISITION.

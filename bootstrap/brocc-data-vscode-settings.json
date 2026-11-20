@@ -1,0 +1,87 @@
+{
+  // brocc-data ONLY. This file is gitignored (root .gitignore ignores
+  // `.vscode`; only .vscode/mcp.json is force-tracked), so nothing here
+  // reaches a PR.
+  //
+  // Only RESOURCE-scoped settings belong here. VS Code ignores
+  // window-scoped settings in a folder-level settings.json -- the dbt.*
+  // and mise.* keys are window-scoped, so they live in
+  // ../data-warehouse.code-workspace instead. Do not move them back.
+
+  // NO "files.associations" here either. Despite the note above it is
+  // window-scoped, so the "*.sql": "jinja-sql" that used to sit here was
+  // ignored and these models opened as `snowflake-sql`. The rule now lives in
+  // ../../data-warehouse.code-workspace, path-qualified to this folder.
+  // ("*.yml": "yaml" went with it -- that is the built-in default anyway.)
+
+  // ---- Why dbt Power User can find the profile at all -----------------
+  // dbt reads DBT_PROFILES_DIR to locate transformation/dbt/profile/, and
+  // the Snowflake settings come from mise.local.toml. mise only exports
+  // those to a shell -- Power User spawns this venv's Python directly with
+  // VS Code's own environment, so a Dock-launched VS Code has neither and
+  // dbt fails with "Could not find profile named 'brocc-snowflake'".
+  //
+  // The extension (v0.64.5) has no setting for either: none of its 33 dbt.*
+  // keys inject env vars or override the profiles dir, and it ignores
+  // python.envFile. So the fix lives on the interpreter instead:
+  //
+  //   transformation/dbt/.venv/lib/python3.12/site-packages/sitecustomize.py
+  //
+  // Python imports that automatically at startup; it asks mise for the
+  // values and sets only variables that are unset, so a real shell always
+  // wins. It is inside .venv/, which is gitignored -- nothing to commit.
+  //
+  // It survives `uv sync` but NOT deleting the venv. If dbt suddenly cannot
+  // find the profile again, that file is the first thing to check.
+
+  // Absolute, not ${workspaceFolder}: Power User validates interpreter
+  // paths with a raw existsSync(), so a ${...} placeholder fails the check
+  // and dbt gets reported as "not installed". Absolute is safe here because
+  // this file is gitignored and machine-local.
+  // ---- Defer -----------------------------------------------------------
+  // Makes unbuilt ref()s resolve to DEV.PROD (a full existing build) instead
+  // of DEV.DBT_SHARLENE, which has never been built because ROLE_DBT is not
+  // granted.
+  //
+  // ⚠ THIS DOES NOT FIX "Preview SQL Query" ON A MODEL. Verified against
+  // this extension's own Python integration (v0.64.5 + dbt 1.10.15): with
+  // defer_to_prod=True, args.defer=True and args.favor_state=True, an
+  // in-process compile STILL emits DEV.DBT_SHARLENE. Deferral in dbt 1.8+
+  // works through defer_relation during ref resolution, and the extension's
+  // ad-hoc compile path does not apply it. Config cannot fix that.
+  //
+  // It DOES apply to dbt commands Power User shells out to (run/build/test),
+  // which use the CLI and honour --defer --state. Verified working there:
+  //     dbt compile --select dim_date --defer --state prod-state --favor-state
+  //   -> select * from DEV.PROD.stg_dates
+  //
+  // To just run a query, use explorations/scratch.sql -- plain SQL, no ref(),
+  // so nothing has to resolve. explorations/ is gitignored.
+  //
+  // manifestPathType is REQUIRED and is NOT in the extension's settings
+  // schema; without it getArtifactDirectory() short-circuits on
+  // `if (this.manifestPathType)` and deferral silently never engages.
+  // manifestPathForDeferral must be a DIRECTORY -- the extension validates
+  // isDirectory() then joins "manifest.json" itself. The manifest there was
+  // made with: DBT_SNOWFLAKE_DEV_SCHEMA=PROD dbt parse
+  //
+  // Key is the project path RELATIVE to the workspace folder, computed as
+  // path.relative(workspaceFolder, projectRoot). deferConfigPerProject is the
+  // one dbt.* setting that is resource-scoped, hence it works in this file.
+  "dbt.deferConfigPerProject": {
+    "transformation/dbt": {
+      "deferToProduction": true,
+      // REQUIRED, and NOT in the extension's settings schema -- without it
+      // getArtifactDirectory() short-circuits on `if (this.manifestPathType)`
+      // and deferral silently never engages. "local" = read the manifest from
+      // disk; "remote" = fetch from Altimate cloud (needs an API key).
+      "manifestPathType": "local",
+      // A DIRECTORY, not a file: the extension validates isDirectory() and
+      // then joins "manifest.json" onto it itself.
+      "manifestPathForDeferral": "/Users/sharlenechin/data-warehouse/brocc-data/transformation/dbt/prod-state",
+      "favorState": true
+    }
+  },
+
+  "python.defaultInterpreterPath": "/Users/sharlenechin/data-warehouse/brocc-data/transformation/dbt/.venv/bin/python"
+}

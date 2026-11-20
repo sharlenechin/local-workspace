@@ -1,0 +1,123 @@
+# Mirror of the model's block in brocc-data's
+# models/marts/npl_common/marts/models.yml. brocc-data is the source of truth.
+version: 2
+models:
+- name: mart_npl_servicing_agg_cases_monthly
+  description: 'One row per portfolio per month: how the cases on the book collected. ⚠ No money and no
+    reconciliation. Both collection totals are compared in Sigma, in euro, because a local-currency comparison
+    is meaningless on a portfolio-month carrying two currencies and two Polish books carry three. This
+    model supplies the one input that comparison needs and cannot get cheaply elsewhere: the collecting-case
+    behaviour, which costs an inner join onto a 134m-row fact, several window functions and a scan of
+    a 1.5bn-row snapshot. Anything Sigma already has is left to Sigma, including the count of months covered,
+    which is a count of the rows here. ⚠ The two amount columns are LOCAL CURRENCY and are not money:
+    20 of 1,252 portfolio-months hold two currencies, on 2 Polish books, measured 2026-10-06. Sigma converts
+    to euro before summing; these exist for a like-for-like comparison and for ranking, not for display.
+    The forecast presence flags live in the Forecasts element, which reads those facts anyway and handles
+    the snapshot-version dedupe. Two sources for one flag can disagree. Likewise anything derivable from
+    the rows here: the coverage ratio, the feed-stopped comparison and the has-loan-detail test are all
+    done there, and the ratio especially, because a stored ratio is wrong as soon as someone filters the
+    months under it. ⚠ Driven from the case side, so it holds only portfolios whose cases have collected:
+    164 of 264, measured 2026-10-06. The 100 that report cash and have never had a case collect are supplied
+    by the portfolio side in Sigma, which left joins this, so an absent row there reads as no loan detail
+    rather than no portfolio. The current month is excluded because it is still being loaded. ⚠ Every
+    measure here tests a positive net rather than the presence of a row, so a month of pure reversals
+    counts as not collecting. ⚠ The transition measures do not partition the collecting population: a
+    case in its second consecutive collecting month matches none of them, 377,028 case-months measured
+    2026-10-06, so the three must not be charted as a breakdown of collected_cases_count. A month in which
+    the portfolio collected from nobody still appears, with collected_cases_count zero, because cases
+    can be recorded as stopping in it. Months are month-end in the OUTPUT, matching period_end_date upstream,
+    but the window arithmetic is done on month-start: measured 2026-10-06, a single-month RANGE frame
+    on month-end dates lands on the wrong day in 8 months out of 12, while on month-start it is exact
+    every time. A bare numeric frame offset is worse still — it counts days and returns 0 on every row
+    with no error.'
+  config:
+    alias: mart_npl_servicing_agg_cases_monthly
+    tags: npl_case
+    materialized: table
+  tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - period_end_date
+  columns:
+  - name: portfolio_sk
+    description: Surrogate key for the portfolio dimension
+    tests:
+    - not_null
+  - name: period_end_date
+    description: Month the figures belong to, as the last day of that month
+    tests:
+    - not_null
+  - name: collected_cases_count
+    description: Cases whose collections NET POSITIVE in the month. ⚠ Changed 2026-10-06 from 'has a collection
+      row' to 'nets above zero', because the fact holds 1,982,111 negative amounts and a month whose only
+      activity is a reversal is not a collecting month. That moved the total by -7,960 case-months, 0.38%.
+      Zero on a month where nothing collected but cases were recorded as stopping; absent entirely where
+      the case feed does not cover the portfolio, which is not the same as zero
+  - name: collected_cases_first_collection_count
+    description: 'Cases whose first NET-POSITIVE collecting month in scope is this one. ⚠ Corrected 2026-10-06:
+      it previously counted the first month holding any collection row, which flagged 1,708 case-months
+      where the month netted to zero or less. In scope means on or after the portfolio''s capex month,
+      so this is the first collection since Brocc bought the book, not the first in the case''s life'
+  - name: collected_cases_three_consecutive_months_count
+    description: Cases that collected in this month and in each of the two preceding months
+  - name: collected_cases_jitter_in_count
+    description: Collected two months ago, nothing last month, collected this month. A case returning
+      after a single quiet month
+  - name: collected_cases_jitter_out_count
+    description: Nothing two months ago, collected last month, nothing this month. A case going quiet
+      after a single isolated collection. ⚠ Counted on the quiet month, not on the month it collected,
+      so it describes a month this case contributes no collection to
+  - name: collected_cases_new_count
+    description: Nothing in either of the two preceding months, collected this month. A case's first collection
+      in scope also counts here, so this overlaps collected_cases_first_collection_count entirely and
+      the two must never be added together
+  - name: collected_cases_lost_count
+    description: Collected two months ago and again last month, nothing this month. A case that was collecting
+      consecutively and has just stopped. ⚠ Counted on the first quiet month, not on the last month it
+      collected
+  - name: collected_amount_local_sum
+    description: 'Total collected in the month, in each case''s own local currency. ⚠ NOT MONEY, and not
+      safe to display: on a portfolio-month holding two currencies this adds unlike units, and 20 of 1,252
+      do. It is also NET OF REVERSALS and can be negative — one portfolio-month nets -896,873.55 against
+      6,070,595.83 collected and -6,967,469.38 reversed, measured 2026-10-06. Convert in Sigma per currency
+      before summing, and read the reversal caveat before quoting a total. ⚠ The four per-behaviour amount
+      columns do NOT sum to this one: they count only cases whose month nets positive, while this is net
+      of every reversal, so on 25 of 1,296 portfolio-months the parts exceed the whole, measured 2026-10-06'
+  - name: collected_amount_local_first_collection_sum
+    description: Of collected_amount_local_sum, the part collected by cases making their first collection
+      in scope. ⚠ Overlaps collected_amount_local_new_sum entirely, so never add the two
+  - name: collected_amount_local_three_consecutive_months_sum
+    description: Of collected_amount_local_sum, the part collected by cases that also collected in each
+      of the two preceding months
+  - name: collected_amount_local_jitter_in_sum
+    description: Of collected_amount_local_sum, the part collected by cases returning after a single quiet
+      month
+  - name: collected_amount_local_new_sum
+    description: Of collected_amount_local_sum, the part collected by cases that collected in neither
+      of the two preceding months
+  - name: collected_amount_local_jitter_out_last_month_sum
+    description: What the cases counted in collected_cases_jitter_out_count were collecting in their LAST
+      month, not in this one — this month they collected nothing, by definition. ⚠ A different month's
+      money, so never add it to collected_amount_local_sum or to the four columns above
+  - name: collected_amount_local_lost_last_month_sum
+    description: What the cases counted in collected_cases_lost_count were collecting in their LAST month,
+      not in this one — this month they collected nothing, by definition. Read it as the monthly collection
+      that has just stopped. ⚠ A different month's money, so never add it to collected_amount_local_sum
+      or to the four columns above
+  - name: cases_on_book_count
+    description: 'Cases on the book AS AT THE END OF THIS MONTH, from the case snapshot. ⚠ Changed 2026-10-06:
+      this was previously the newest snapshot repeated on every row, so it is no longer a portfolio constant
+      and moves month to month. Null where the snapshot has no row for that month, which is not zero —
+      2 rows, measured 2026-10-06, both on a book whose snapshot stops before its collections do'
+  - name: cases_ever_collected_count
+    description: 'Cases on the book this month that had collected at least once BY THE END OF THIS MONTH.
+      ⚠ Ever means ever-so-far, not ever-in-the-end: this is as at this month, not as at today, so a case
+      whose first collection is in June counts here from June onward and not in May. Rises over a portfolio''s
+      life and never falls, so it reads as a penetration curve'
+  - name: cases_never_collected_count
+    description: Cases on the book this month that had not collected by the end of this month. ⚠ NEVER
+      MEANS NOT-AS-AT-THIS-MONTH, not never-in-the-end — a case counted here in May may well collect in
+      June and leave this count. Together with cases_ever_collected_count this sums exactly to cases_on_book_count
+      on every row that has a snapshot

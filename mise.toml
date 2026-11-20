@@ -1,0 +1,59 @@
+# Local analysis workspace.
+#
+# Deliberately OUTSIDE brocc-data: that repo's mise.toml sets
+# `monorepo_root = true` and its dbt project pins an exact dbt-snowflake
+# dependency tree, so notebook extras added there risk breaking builds.
+# mise has no problem with a config here — any directory with a mise.toml
+# gets its own tools and env, monorepo or not.
+
+[tools]
+python = "3.12" # matches brocc-data, whose dbt project requires ==3.12.*
+uv = "latest"
+
+[env]
+# One venv at the workspace root, inherited by every sub-project folder
+# (examples/, and whatever comes next).
+_.python.venv = { path = "{{config_root}}/.venv", create = true }
+
+# Which profile in ~/.snowflake/config.toml to use. "prod" is
+# brocc-prod / NPL_ANALYST; "sandbox" is brocc-sandbox / PUBLIC.
+SNOWFLAKE_CONNECTION = "prod"
+
+# Neither profile in ~/.snowflake/config.toml sets a warehouse, and
+# Snowflake rejects queries with no active warehouse. NPL_ANALYST_WH is the
+# one matching the NPL_ANALYST role; `datalake.warehouses()` lists the rest.
+SNOWFLAKE_WAREHOUSE = "NPL_ANALYST_WH"
+
+[tasks.create-venv]
+description = "Create the Python virtual environment"
+run = "uv venv --allow-existing"
+
+[tasks.install]
+description = "Create venv + sync dependencies"
+alias = "i"
+depends = ["create-venv"]
+run = "uv sync"
+
+[tasks.kernel]
+description = "Register the venv as a Jupyter kernel VS Code can select"
+run = """
+uv run python -m ipykernel install --user \
+  --name local-workspace --display-name 'Python (local-workspace)'
+"""
+
+[tasks.sql]
+description = "Run a .sql file and print the result (mise run sql -- <file> [key=value])"
+run = "uv run python scripts/run_sql.py"
+
+[tasks.sigma]
+description = "Pull/push a Sigma workbook's code (mise run sigma -- push <id> <file>)"
+run = "uv run python scripts/sigma_workbook.py"
+
+[tasks.check]
+description = "Verify the Snowflake SSO connection"
+alias = "c"
+run = "uv run python scripts/check_connection.py"
+
+[tasks.lab]
+description = "Launch JupyterLab in the workspace"
+run = "uv run jupyter lab"

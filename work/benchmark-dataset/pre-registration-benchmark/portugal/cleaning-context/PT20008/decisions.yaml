@@ -1,0 +1,40 @@
+open_rejections: []
+confirmed:
+- field: segment
+  by: sharlene
+  at: 2026-10-11 20:59
+  mapping: base | Folha1 | fase_recuperacao | text
+  tape_md5: 3752cba10eecf47562e80f477593056a
+  note: confirmed by sharlene on review, 2026-10-11
+- field: product_type
+  by: sharlene
+  at: 2026-10-11 20:59
+  mapping: base | Folha1 | produto | text
+  tape_md5: 3752cba10eecf47562e80f477593056a
+  note: confirmed by sharlene on review, 2026-10-11
+- field: origination_date
+  by: sharlene
+  at: 2026-10-11 20:59
+  mapping: base | Folha1 | Data_Contrato | date
+  tape_md5: 3752cba10eecf47562e80f477593056a
+  note: confirmed by sharlene on review, 2026-10-11
+deal: PT20008
+approved: true
+approved_mappings:
+  cutoff_balance: base | Folha1 | Divida_Total | amount
+  cutoff_principal: base | Folha1 | Divida_Contabilistico | amount
+  insolvency_claims_balance: base | Folha1 | Valor_Reclamado | amount
+  insolvency_end_date: base | Folha1 | Data_Fim_Exoneracao_Insolv | date
+  insolvency_start_date: base | Folha1 | Data_Inicio_Exoneracao_Insolv | date
+  insolvent_flag: base | Folha1 | fase_recuperacao | part:INSOLVENTE
+  judicialised_flag: base | Folha1 | fase_recuperacao | part:CONTENCIOSO
+  origination_date: base | Folha1 | Data_Contrato | date
+  product_type: base | Folha1 | produto | text
+  segment: base | Folha1 | fase_recuperacao | text
+approved_tape_md5: 3752cba10eecf47562e80f477593056a
+approved_output_md5: f80ea0c0acf22f6c05e018c1a1d21599
+reviewed_by: sharlene
+reviewed_at: 2026-10-13 12:32
+note: Approved the strats hit as the right quantity and the JUDGEMENT mappings as
+  meaning what they say. PROVEN rows were settled by exact reconciliation and not
+  re-checked.

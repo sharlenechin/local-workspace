@@ -1,0 +1,83 @@
+# Legal-type columns used in npl-underwriting — Sweden
+#
+# Scraped 2026-10-08 from npl-underwriting/deals/*/**.py and .ipynb.
+# Deal assets are gitignored and absent, so this is what the CODE
+# references, not what every tape actually shipped.
+#
+# ⚠ 'liquidation' is EXCLUDED throughout. In this repo it means the
+#   recovery curve (sum_liquidations, log_liquidation, cumulative
+#   liquidation %), not the insolvency process. Counting it as a legal
+#   term would have made it the top hit in every country.
+
+country: Sweden
+country_code: SE
+deal_count: 3
+legal_term_count: 11
+
+deals:
+  - deal: ember
+    identified_as: "SE25030"
+    country_basis: "deal code"
+  - deal: ember-fresh
+    identified_as: "SE25030"
+    country_basis: "deal code"
+  - deal: norion-sweden
+    identified_as: "LOK-SE25013 Norion Bank"
+    country_basis: "prod"
+
+# Enforced by npl_schema.CleanedAccountsSchema / CleanedPaymentsSchema.
+# IDENTICAL IN EVERY COUNTRY — the schema is shared, not per-country.
+mandatory_fields:
+  accounts:
+    - model_id  # unique
+    - registration_date
+    - registration_balance
+    - extraction_date
+  payments:
+    - model_id
+    - payment_date
+    - payment_amount
+
+# Schema-optional fields, and how many of this country's deals name them.
+optional_fields_used:
+  product_type: 3   # of 3 deals
+  customer_type: 2   # of 3 deals
+  default_date: 2   # of 3 deals
+  pricing_segment: 2   # of 3 deals
+
+# Every legal-type column the code references, with the number of deals
+# in this country that use it. Sorted by count, then name.
+legal_terms:
+  "bailiff_flag":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "dca_deceased_flag":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "dcabankruptcyflag":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "dcadeceasedflag":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "deceased":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "deceased_flag":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "insolvency_flag_at_registration":
+    deals: 2
+    used_by: [ember, ember-fresh]
+  "bailiff_date":
+    deals: 1
+    used_by: [ember]
+  "bankruptcy_flag":
+    deals: 1
+    used_by: [ember-fresh]
+  "dca_bailiff_date":
+    deals: 1
+    used_by: [ember]
+  "dca_bankruptcy_flag":
+    deals: 1
+    used_by: [ember-fresh]

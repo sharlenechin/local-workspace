@@ -1,0 +1,53 @@
+{
+  "_comment": "settings.theme for the Servicing workbook. NPL Portfolio Dashboard v2's theme (sizes, spacing, table style) with Brocc's brand: font FFF Acid Grotesk (the name Sigma knows it by, as the NPL workbook uses it) and the palette of work/servicing/design/reference/Example Slides.potx (deep green #012E26, cream, periwinkle, violet). Series colours follow list order: charts list the benchmark first (violet, drawn behind) and actuals second (green, in front). Green and red keep their meaning: ahead and behind.",
+  "name": "aa9cb111-1b98-4cff-9a9c-43ff0fb3378f",
+  "overrides": {
+    "borderRadius": "round",
+    "categoricalScheme": [
+      "#4F3DFF",
+      "#1D5B4D",
+      "#A6ADF8",
+      "#012E26",
+      "#C62828",
+      "#2E7D32",
+      "#5C6B66",
+      "#E4E7FC",
+      "#8790AB",
+      "#F7F8FE"
+    ],
+    "colors": {
+      "highlight": "#1D5B4D",
+      "text": "#012E26"
+    },
+    "fonts": {
+      "dataFont": "FFF Acid Grotesk",
+      "textFont": "FFF Acid Grotesk"
+    },
+    "space": {
+      "showElementPadding": "shown",
+      "unit": "large"
+    },
+    "tableStyles": {
+      "autofitColumns": "shown",
+      "cellSpacing": "medium",
+      "gridLines": "horizontal",
+      "preset": "presentation",
+      "textStyles": {
+        "cell": {
+          "color": "#012E26",
+          "fontSize": 13
+        },
+        "header": {
+          "color": "#1D5B4D",
+          "fontSize": 12,
+          "fontWeight": "bold"
+        }
+      }
+    },
+    "titleFont": {
+      "color": "#012E26",
+      "fontSize": 16,
+      "fontWeight": "bold"
+    }
+  }
+}

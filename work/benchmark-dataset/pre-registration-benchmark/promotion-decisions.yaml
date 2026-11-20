@@ -1,0 +1,6 @@
+T13:
+  decision: skip
+  detail: no deterministic signal - judging whether a match beats its chance floor is reasoning, not a
+    condition a function can test
+  by: sharlene
+  at: '2026-10-07'

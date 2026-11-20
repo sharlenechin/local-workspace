@@ -1,0 +1,463 @@
+# Lessons about OUR OWN PIPELINE - the engine, the review, the output
+# contract, and the agent's own conduct. Not about any seller's tape.
+#
+# Split out of traps.yaml on 2026-10-13. Same format, same promotion ladder,
+# same ids - T27 is still T27 and every reference to it still resolves. What
+# changed is WHEN YOU READ IT: traps.yaml is read once per deal, this file is
+# read when you are about to CHANGE THE ENGINE. A deal cannot change the
+# engine, so a deal never needs these.
+#
+# !! THE SHORT VERSION IS ALREADY IN THE AGENT DEFINITION. Five standing rules
+#    under "Standing rules, learned the hard way" compress twenty-three of
+#    these, because the lesson has to arrive BEFORE the mistake and nobody
+#    reads a 30KB file speculatively. This file is the evidence behind those
+#    rules: what it cost, on which deal, and what now enforces it.
+#
+# !! MOST OF THESE ARE ENFORCED BY A CASE, NOT BY PROSE. scripts/cases.py is
+#    the real memory - a test cannot rot the way a paragraph can. Where a
+#    `case` is named, the test is the authority and this entry is the why.
+
+T27:
+  title: Partial evidence labelled as full evidence
+  symptom: a deal carries verification_status `reconciled` on the strength of one proven total out of
+    thirty-nine sheets.
+  cause: the status was set by the EXISTENCE of a strats hit rather than by how much of the book that
+    hit accounts for. On a single-sheet deal those are the same thing; on a twelve-cohort WiZink book
+    they are not remotely.
+  detector: none needed.
+  guard: clean_accounts computes the share of in-scope balance sitting on sheets that carry a proven total,
+    prints it, and writes `reconciled` only above 99.5%.
+  rule: Evidence is measured, not counted. Twenty proofs that cover three quarters of a book is a book
+    that is three quarters proven, and the word beside the number has to say so - a reader trusts `reconciled`
+    completely and should only ever see it when it is completely earned.
+  seen_on:
+    the WiZink and Barclaycard books:
+      detail: PT20014 reconciled 0.7% of its balance and said `reconciled`; PT19007 4.9%; PT15014 75.3%
+        across 20 separate proofs, with four of its eleven cohorts carrying no footer total at all.
+      cost: three deals were reported to the user as reconciled when they were not. Caught before review,
+        and only by totting up what the hits actually covered.
+T28:
+  title: A check that swallows the exit code reports failure as success
+  symptom: a sweep over every deal prints nothing alarming, and four of the twelve never ran at all.
+  cause: shell loops written as `script.py $d >/dev/null 2>&1` or `r=$(script.py $d | grep ...)`. A crash
+    produces no stdout, so grep matches nothing, so the loop prints the fallback - which reads exactly
+    like a legitimate 'no published total'. The exit code is discarded by the pipe.
+  detector: none. This is a discipline, not a column.
+  guard: cases.py REPRO runs reproduce.py over every deal and asserts returncode 0, which is what caught
+    it.
+  rule: Any loop over deals must test the EXIT CODE and print the captured log on failure. Never redirect
+    stderr to /dev/null while verifying, and never infer success from the absence of an expected string
+    - absence is what failure looks like.
+  seen_on:
+    the whole pipeline:
+      detail: an UnboundLocalError left PT18019, PT19013, PT20006 and PT21004 unable to write output.
+        They kept their PREVIOUS parquet on disk, so the guards, summaries and reviews that ran afterwards
+        read stale files and all reported pass. It happened twice in one session - the same shell habit
+        also hid a crash in review.py on every deal with a derived field.
+      cost: 'none reached the user: the stale files rebuilt byte-identical once the bug was fixed, because
+        nothing about those deals'' logic had changed. That was luck, not design.'
+T31:
+  title: A grain collapse that sums only one of the amount columns
+  symptom: a book that tallied to the cent for a week comes up EUR 1,201,901.56 light, the moment an unrelated
+    field is renamed.
+  cause: the list of columns to ADD when several rows collapse into one loan was hardcoded as `cutoff_balance`.
+    Every other amount was taken with `first`. PT15018 collapses 79 migration-split accounts whose balances
+    are PARTS of one loan, so moving its figure to `cutoff_principal` silently took one part of each.
+  detector: none needed.
+  guard: in_scope_balance against the seller's published figure, which failed immediately.
+  rule: When a grain collapses, EVERY amount field sums and every label takes the first. Derive the list
+    from the schema's amount fields, never write it out - a hardcoded list of one is a list that is wrong
+    as soon as the schema grows.
+  seen_on:
+    PT15018:
+      detail: 79 accounts split by a DDA->OCV migration, 1,201,901.56 of principal in the parts that were
+        dropped.
+      cost: none - the guard caught it in the same run.
+T32:
+  title: Aggregating on a group key that is entirely null
+  symptom: a deal with hundreds of thousands of real payment rows reports zero collections over zero months,
+    and no error.
+  cause: pandas drops rows whose GROUP KEY is NaN. PT18019's payments carry no dates at all (T20), so
+    grouping by period_month discarded all 475,485 rows holding EUR 10,615,169.65. An undated payment
+    is still a payment - it is the DATE that is missing, not the money.
+  detector: none needed.
+  guard: 'guards.py reconciles the cleaned payments back to the raw tape: gross + returns + out-of-scope
+    must equal the raw total. Zero against ten million fails that instantly.'
+  rule: Any groupby or pivot on a column that CAN be null passes dropna=False, and the output is reconciled
+    back to its input by total. Where the key is genuinely absent, group on whatever the seller did give
+    - here the relative period label - and record that no dates exist rather than producing an empty result.
+  seen_on:
+    PT18019:
+      detail: 475,485 rows, EUR 10,615,169.65, aggregated to 0.00 over 0 months and 0 loans.
+      cost: none - caught the same minute, by the figure being implausibly round.
+T35:
+  title: A review sheet that cannot say "nothing left to do"
+  symptom: a deal half-reviewed looks identical to a deal nobody has opened. Every judgement row is listed
+    on every regeneration, forever.
+  cause: the sheet was built as a REPORT of all mappings rather than a QUEUE of open questions, so progress
+    had nowhere to show and the end state had no representation.
+  detector: none needed.
+  guard: review.py lists only unconfirmed rows and prints "Nothing left to read" when the queue empties;
+    decisions.yaml accumulates the confirmations with their reasons.
+  rule: The review is a queue and the decision record is the archive. A field confirmed by a human leaves
+    the queue and enters the record with a reason. Finished means the queue is empty and the record is
+    full - and that state must be visible on the page, not inferred.
+  seen_on:
+    the whole pipeline:
+      detail: twelve deals all read 'NOT APPROVED' with every row open, whether or not anyone had looked
+        at them.
+      cost: none realised; raised by the user before the review started.
+T36:
+  title: A confirmation that outlives the file it was made against
+  symptom: every field reads as confirmed against data nobody has looked at, because the seller sent a
+    corrected tape and the mapping never changed.
+  cause: pinning the mapping alone. The mapping is only half of what a judgement depends on - the other
+    half is the bytes it was judged on.
+  detector: none needed.
+  guard: each confirmation pins BOTH the mapping (role, sheet, column, transform) and the md5 of the raw
+    tape. Either moving voids it, and the sheet lists the voided fields and says which of the two changed.
+  rule: 'Same raw file AND same mapping, or the question re-opens. This is the same principle as approved_output_md5
+    one level down: a signature may never outlive the thing it signed.'
+  seen_on:
+    the whole pipeline:
+      detail: raised while building per-field confirmation - 'to ensure reproducibility for the same exact
+        raw file?'
+      cost: none; caught before the first confirmation was recorded.
+T37:
+  title: A registry row that points at a column which does not exist
+  symptom: nothing. The clean exits 0, every guard passes, and the field is empty - and the approval sheet
+    files it under "empty on this deal", which reads as THE TAPE DOES NOT CARRY IT. A typo becomes a fact
+    about the seller.
+  cause: the engine looked the column up and skipped the row when it was absent, because an absent column
+    is the normal case for an enrich sheet that does not cover every field. Skipping silently is right
+    for a sheet that lacks a column; it is wrong for a registry row that names one that was never there.
+  detector: none needed - this is checked before anything is built.
+  guard: 'clean_accounts validates every row against the actual tape BEFORE cleaning: the sheet pattern
+    must match a real sheet, every column (after splitting `a + b` and `a | b`) must exist on one of them,
+    and the transform must be known. It refuses with the closest real column name, which is also the fastest
+    fix.'
+  rule: A mapping that silently does nothing is indistinguishable from a tape that lacks the field, and
+    the second is a finding while the first is a bug. Refuse, name the bad column, and suggest the nearest
+    real one. Roles that do not name a column - `prefer` names a file, `grain` names a collapse rule -
+    are exempt.
+  seen_on:
+    the whole pipeline:
+      detail: 'proven by typing `Producto` for `Produto` on PT15020: exit 0, ALL GUARDS PASS, product_type
+        silently empty on all 5,313 loans.'
+      cost: none realised. Found by asking what the weakest point of the loading process was, rather than
+        by a deal failing.
+T38:
+  title: A review that only accepts per-field answers
+  symptom: a reviewer with three things to say about a deal can record one of them. The other two live
+    in a chat window and are gone next week.
+  cause: the sheet offered confirm and reject, both keyed on a target_field. Real review produces questions
+    that SPAN fields - is this the right month, why do only 673 of 32,529 loans carry a claim - or belong
+    to no field at all.
+  detector: none needed.
+  guard: an open note BLOCKS approval, exactly as an open rejection does. --close refuses unless the note
+    has been answered, or the reviewer says --anyway with a reason.
+  rule: Two channels, one loop. Per-field confirm for what maps to a field, so the queue can empty deterministically;
+    a deal-level note for everything else. Both follow raise -> the AGENT answers -> the reviewer closes,
+    and the question and its answer are both kept after closing, because a closed question with no visible
+    answer is just a deleted question.
+  seen_on:
+    the whole pipeline:
+      detail: 'raised by the user while reading the first sheets: ''usually when reviewing one has multiple
+        things to say and sometimes it is not necessarily per field''.'
+      cost: none realised; the review had not started.
+T39:
+  title: Asking a reviewer to confirm every field one at a time
+  symptom: review stalls. Twelve deals at roughly eight judgement rows each is ninety-six keystrokes to
+    say yes ninety-six times, when the reviewer's real answer is "these two are wrong, the rest are fine".
+  cause: designing the sheet as a checklist to be ticked rather than as a list to be challenged. It optimises
+    for the rare case (a field needs discussion) and taxes the common one (most fields are obviously right).
+  detector: none needed.
+  guard: --approve now pins the mapping of EVERY field plus the raw tape md5, so a blanket sign-off is
+    exactly as traceable as per-field ticks. If any one mapping changes afterwards the sheet names the
+    field and shows was/now.
+  rule: REJECT UNTIL APPROVE. The reviewer rejects what is wrong and notes what they want answered; approving
+    signs off everything left in one action. Traceability comes from what the approval PINS, not from
+    how many times the human typed yes. --confirm survives for a deal reviewed across several days, but
+    it is never required.
+  seen_on:
+    the whole pipeline:
+      detail: the per-field design lasted about twenty minutes before the user pointed out the arithmetic
+        of it.
+      cost: none realised; the review had not started.
+T40:
+  title: The dataset is checked for staleness and the DOCUMENTS are not
+  symptom: a reviewer reads an approval sheet that describes an older version of the code, and every check
+    in the pipeline reports green.
+  cause: reproduce.py rebuilds the data and compares MD5; backtest.py fingerprints every column. Both
+    cover the OUTPUT PARQUET and neither regenerates REVIEW.md or cleaned_summary.md. Change review.py
+    and the sheets on disk lag silently.
+  detector: none needed.
+  guard: cases.py FRESH regenerates every REVIEW.md and cleaned_summary.md and fails if the content moved,
+    ignoring only the `generated` date line, which changes every midnight and means nothing.
+  rule: Anything a human READS is an output and needs the same staleness check as anything a machine reads.
+    A stale dataset is caught by a hash; a stale document is read, believed and signed.
+  seen_on:
+    the whole pipeline:
+      detail: 11 of 12 approval sheets were behind the code when this was first measured, after an afternoon
+        of changes to review.py.
+      cost: none - the review had not started. Found by the user asking whether the deals need re-running
+        after a change.
+T41:
+  title: A sheet that shows the mapping but not the reason
+  symptom: a reviewer sees `cutoff_balance <- curr_bal` and cannot tell whether it was measured or guessed.
+    The two look identical.
+  cause: the argument lived in the registry note, which only the agent reads. The approval sheet showed
+    field, column, fill rate and a sample - everything except why.
+  detector: none needed.
+  guard: review.py renders a `why this column` cell from the registry note, preferring the part after
+    a `!!` marker, trimmed to one sentence.
+  rule: Put the reason where the question is asked. A reviewer deciding whether a mapping is right needs
+    the argument beside it, not in another file - and a mapping with NO note renders as `-`, which is
+    itself the finding.
+  seen_on:
+    the whole pipeline:
+      detail: raised by the user on reading the first sheets.
+      cost: none; the review had not started.
+T42:
+  title: A guard that silently does not apply
+  symptom: ALL GUARDS PASS on a deal where a check was never attempted, which reads exactly like a deal
+    where it was attempted and passed.
+  cause: per-deal guards are additive by design - a deal that cannot support a check simply omits it from
+    EXPECT. That is right, and saying nothing about it is not.
+  detector: none needed.
+  guard: the roll-forward prints NOT POSSIBLE and the reason on the eleven deals that cannot support it.
+    Same pattern as `capital <= balance` printing `not comparable` when the two columns come from different
+    sheets.
+  rule: A check that cannot run says so, in the same place it would have reported a result. Absence of
+    a line is not evidence of anything, and a reviewer should never have to know which guards apply to
+    which deal to read the output.
+  seen_on:
+    the whole pipeline:
+      detail: 'raised by the user: ''if it is a guard what if there is no closing?'''
+      cost: none.
+T47:
+  title: A wide payments file makes every reader re-derive the net
+  symptom: three money columns side by side - payment_in, payment_out, payment_amount - where the third
+    is the first minus the second, so any reader who sums the wrong one is quietly wrong.
+  cause: 'the wide shape mirrors how the seller ships the data (a column per month, a series per direction)
+    rather than what a payment IS. It also invents a row for a return that never happened: 4,053 PT15018
+    rows each carried a payment_out of 0.00.'
+  detector: none needed.
+  guard: guards.py reconciles the long file back to the raw tape, and the backtest fingerprints the signed
+    total plus the per-direction split.
+  rule: 'One row per payment EVENT, long. Money in is positive, money out is negative, and summing payment_amount
+    over anything - a loan, a month, the book - is the net by construction. Keep `direction` beside it
+    so the sign is self-documenting: a reader must never have to assume which way a negative points, which
+    is the assumption that makes a refund read as a receipt.'
+  seen_on:
+    the whole pipeline:
+      detail: PT15014 is 372 in and 1 out; PT15018 is 4,053 in and none. The wide file carried a zero
+        out-column on every row of three deals.
+      cost: none realised. Every total is unchanged by the reshape - the backtest shows only the fingerprint
+        keys renaming.
+T49:
+  title: A target schema that grows with every tape
+  symptom: a 26-column superset where most columns are null on most deals, and every new fact forces a
+    schema version, a re-run of all twelve deals, and a re-approval of deals that did not change.
+  cause: 'treating the output as one wide table. A deceased flag wanted by five deals, a fee column by
+    two, an insolvency date by two - each widened the table for everyone. Null then meant two different
+    things: this tape does not carry it, and some other seller had this.'
+  detector: none needed.
+  guard: the backtest fingerprints the long table per attribute - a count and a content hash for each
+    - so a fact moving out of the core is still watched exactly as closely.
+  rule: 'A FIXED core of facts every consumer can rely on, plus an OPEN long table for everything else
+    - deal_id, loan_id, column_name, column_value, column_type. A new fact is a registry row and nothing
+    more. A new CORE column stays deliberately expensive, because it is a promise to every consumer: it
+    re-runs every deal and stales every approval.'
+  seen_on:
+    the whole pipeline:
+      detail: schema v4, 2026-10-09. Eight facts moved out - claims_balance, judicialised_flag, insolvent_flag,
+        insolvency_date, product_description, collateral_type, detail_level, loan_id_missing_flag. Every
+        total unchanged, backtest green.
+      cost: none. Of 49 traps, exactly ONE needed touching - T16, whose CASE read judicialised_flag off
+        the accounts file. The rule it proves was about meaning, not storage, so it survived the move
+        with an address change.
+T50:
+  title: A long table keyed on an id that can be null
+  symptom: every fact about a deal is orphaned. PT20008's 10,004 attribute rows all carried a NULL key
+    and could not be joined back to the loan they describe - 100% of that deal's facts, silently.
+  cause: 'the long table was keyed on loan_id, which is the SELLER''s id and is genuinely absent on some
+    loans: 106 on PT15018 carry no account number, and PT20008 is anonymised with no identifier anywhere
+    on its tape.'
+  detector: none needed.
+  guard: clean_accounts writes account_key on every row of both tables and REFUSES if it is not unique.
+    A check across all twelve asserts non-null in both tables and that every attribute row joins back.
+  rule: 'A long table needs a key that exists for EVERY row, which means it must be OURS. account_key
+    is a hash of the deal plus the source row - it claims nothing about the loan, it only says ''this
+    row''. That is not the surrogate key T19 forbids: that one would have papered over a duplicate BUSINESS
+    id. Keep loan_id in the table for convenience, never as the join.'
+  seen_on:
+    PT20008:
+      detail: 10,004 of 10,004 rows unattachable; PT15018 287, PT16023 12, PT20006 10.
+      cost: none realised - raised by the user asking what happens to a row with a missing loan_id.
+T52:
+  title: Proving one output rebuilds and calling the folder reproducible
+  symptom: a green ALL DEALS REPRODUCIBLE that covers a third of what the pipeline writes.
+  cause: reproduce.py was written when accounts WERE the output. They are now one of three - the long
+    table carries eight facts that used to be columns, and payments carry every collection - and the check
+    never grew with them.
+  detector: none needed.
+  guard: reproduce.py rebuilds and compares accounts, additional_attributes AND payments, and prints a
+    hash per output so the claim is visible rather than implied. Proven to bite by tampering with one
+    payment row.
+  rule: A reproducibility claim must name what it covers. When an output is added, the check that proves
+    it rebuilds is part of adding it - not a later thought. The same applies to the backtest, which had
+    to learn payments and the long table for the same reason.
+  seen_on:
+    the whole pipeline:
+      detail: raised by the user asking whether the FOLDER is reproducible, not whether the deals are.
+        It was not.
+      cost: none realised - all three outputs did in fact rebuild identically once checked.
+STYLE:
+  title: Decorative characters in generated output
+  symptom: mojibake in a terminal, a failed grep, a broken CSV parse
+  cause: emoji, circled digits, arrows, em dashes and curly quotes in files people grep, diff and paste.
+  guard: cases.py scans every .md .py .yaml .csv including the agent file
+  rule: Generators sanitise ON WRITE, because half a review is sample values read from the seller's tape.
+    Accented letters are kept - they are the seller's own column names.
+  seen_on:
+    the whole pipeline:
+      detail: the agent file sat outside the scanned folder and held ten
+T56:
+  title: A pipeline that cannot rebuild into an empty folder
+  symptom: FileNotFoundError on the first write, on every deal, before a single row is produced
+  cause: every output folder was created with `OUT.mkdir(exist_ok=True)`. That creates the LEAF
+    and assumes the parent exists. `portugal/cleaned/` existed only because somebody had made it
+    by hand months earlier, so the defect was invisible for as long as nobody deleted it.
+    Seven call sites across five scripts, all the same.
+  detector: none. Nothing in the raw data can show this.
+  guard: cases.py (COLD) reads every `.mkdir(` in scripts/ and portugal/raw/ and refuses any without
+    `parents=True`.
+  rule: >-
+    Reproducible means reproducible from NOTHING. A pipeline that only reruns correctly into
+    the tree it already wrote has not been tested; it has been re-run. The test is to delete every
+    derived folder and build from the archive alone, and it is worth doing because it is the only
+    one that would have caught this.
+  seen_on:
+    the whole pipeline:
+      detail: deleting processed/ and cleaned/ and rebuilding failed on all twelve deals at once.
+      cost: none shipped - the failure is loud and nothing downstream is written. But every claim
+        that the folder was reproducible was, until this was fixed, unproven for a cold start.
+T62:
+  title: An approval that outlived the thing it approved
+  symptom: a deal reads APPROVED and the pipeline exits 0, over output that changed after signing
+  cause: two independent gaps pointing the same way. review.py fingerprinted `accounts.parquet`
+    alone, so a change landing only in additional_attributes left the signature matching - PT20008
+    was signed, a field renamed under it, 1,205 attribute rows moved, and the sheet still said
+    "APPROVED -- nothing to do". run.py was worse - it read the `approved` boolean and compared
+    nothing at all, so a deal signed last week and re-cleaned today reached "sequence complete"
+    with a green exit code.
+  detector: none. Nothing in the raw data can show it.
+  guard: ONE definition, style.output_fingerprint(deal), covering accounts, additional_attributes
+    and payments. review.py reports APPROVED-STALE; run.py STOPS and returns 3. The reviewer signs
+    the MAPPINGS and most mappings land in the long table, so the long table is part of the
+    signature.
+  rule: >-
+    A signature pins what was signed, all of it, or it pins nothing. A partial fingerprint is worse
+    than none: it carries the authority of a check that was never made, and it fails silently in
+    exactly the case it exists for - the day somebody changes something after approval.
+  seen_on:
+    PT20008:
+      detail: approved 2026-10-12 11:08; insolvency_claims_balance renamed and re-renamed under
+        the signature the same hour, with no warning either time.
+      cost: none shipped - found within the hour, while making the very change that exposed it.
+        Nothing downstream had consumed the deal.
+T65:
+  title: An approval that pinned a file the reviewer was never shown
+  symptom: a signed deal whose payments nobody looked at, and two inferences nobody was asked about
+  cause: the approval fingerprint was widened to cover accounts, additional_attributes AND payments
+    (T62), but REVIEW.md still displayed only the first two. So the signature covered a payments
+    file the sheet never mentioned. Worse, payments carry the two judgements with the largest
+    reach in the whole deal and neither was in front of anybody - WHICH COLUMN is the key, chosen
+    by value overlap and never by name, and WHETHER THE SIGN WAS FLIPPED, decided once per deal
+    from how that seller writes receipts. Both are inferences; both move every figure in the file.
+  detector: none. The file is correct; it was simply invisible.
+  guard: review.py carries a Payments section - rows, grain, months, gross, returns, net, the key
+    and its overlap evidence, the sign decision and its evidence, and the caveats that are easy to
+    misread (straddling keys kept whole, no returns series, wide-format empty cells dropped,
+    net-negative months).
+  rule: >-
+    Show everything the signature covers. A pin on a file nobody displayed is not a review, it is a
+    signature collected under a misunderstanding - and the parts most worth showing are exactly the
+    ones a machine decided for itself, because those are where nobody has looked.
+  seen_on:
+    the whole pipeline:
+      detail: five deals write payments; three have none at all; PT20008 has 37,765 payment cells
+        that cannot be attributed to any loan. All three cases now read differently on the sheet.
+      cost: none shipped. But PT20008 was approved twice while its 37,765 blocked payment cells
+        went unmentioned.
+    PT20014:
+      detail: the first cut of the section said "the tape HAS payment cells" for a deal with zero.
+      cost: none - caught before any deal was re-approved. A review sheet asserting something false
+        about the tape is worse than one that says nothing.
+T68:
+  title: An output with no contract, which grew three shapes
+  symptom: five payment files, three different column sets, and nothing saying which to expect
+  cause: schema.yaml pinned `accounts` and `additional_attributes` from the start and said nothing
+    about payments. So the columns followed whatever each tape happened to offer - `loan_id` on
+    three deals, `client_id` on two, and `period` on PT18019 alone. Every consumer reading more
+    than one deal had to special-case it, and nothing would have failed if a sixth shape appeared.
+  detector: none. Each file was internally fine.
+  guard: schema.yaml carries a `payments` block and clean_payments builds its columns FROM it, so
+    the file cannot drift from the contract. cases.py (PAYSHAPE) checks every file matches.
+  rule: >-
+    An output nobody wrote a contract for will grow one shape per input. The contract is not
+    paperwork - it is the only thing that makes two deals comparable, and the output that lacked
+    one is exactly the output that drifted.
+  seen_on:
+    the whole pipeline:
+      detail: now deal_id, grain, loan_id, client_id, payment_month, period, payment_amount on all
+        five. Both id columns always present; `grain` says which carries the key.
+      cost: none shipped.
+T71:
+  title: Three outputs with no shared join column
+  case: grain_is_stated_and_agrees_across_every_output
+  symptom: a consumer joins accounts to payments on loan_id and silently gets nothing
+  cause: accounts and additional_attributes are always per loan, so loan_id looks like the obvious
+    key everywhere. Payments are not - PT15018 and PT16023 record collections against the
+    BORROWER, so their payments carry no loan at all. Joining those on loan_id returns zero rows
+    and looks like a book with no collections. Joining on both ids with nulls as empty strings is
+    worse - it matched 37 of 4,053 PT15018 rows, because accounts carry BOTH ids while payments
+    carry one.
+  detector: none needed.
+  guard: a `grain` column in all three outputs, the same value in each, naming the one column that
+    joins them. style.deal_grain decides it once from the registry and the raw payment cells, so
+    it cannot depend on which script ran first, and clean_payments REFUSES if its own key differs.
+    guards.py checks the named column is populated in accounts and that the long table has no
+    orphan account_key.
+  rule: >-
+    Say which column joins the outputs, in the outputs. A consumer should never have to work out
+    the grain from which columns happen to be null, and never have to know that one deal of
+    thirteen is keyed on people rather than loans.
+  seen_on:
+    PT15018:
+      detail: grain client_id - 4,053 payments over 1,706 borrowers holding 32,692 loans.
+      cost: none shipped.
+    PT20008:
+      detail: grain account_key - this tape carries no identifier at all.
+      cost: none.
+  promoted: 2026-10-13 - seen on a second deal
+T74:
+  title: An empty artefact that cannot be told from one nobody made
+  symptom: thirteen dictionary files all saying nothing was found, four empty strat files
+  cause: every scanner wrote a per-deal file whether or not it found anything, so the folder listed
+    a file per deal and most held only `status - none`. The noise hides the signal - with 13 files
+    present and 13 empty, nothing in the folder tells you which deals HAVE a data dictionary.
+  detector: none needed.
+  guard: a per-deal file exists ONLY where something was found. The fact that we LOOKED moves to
+    one `_scanned.json` per folder - deal, date, count, and what was searched.
+  rule: >-
+    Store what you found, record that you looked. Those are different facts and they belong in
+    different places - deleting the empty file alone would lose the second one, and an absent
+    strats file cannot be told from a deal nobody ever scanned. One index line costs nothing and
+    says "648 combinations searched, no published figure", which is itself a finding.
+  seen_on:
+    the whole pipeline:
+      detail: dictionaries went from 13 files to 1 index - no Portuguese tape carries a data
+        dictionary at all. strats went from 14 to 10 plus an index.
+      cost: none shipped.

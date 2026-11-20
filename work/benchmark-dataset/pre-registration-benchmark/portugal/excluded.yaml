@@ -1,0 +1,18 @@
+# Files we HOLD in assets/ but have decided not to use.
+#
+# !! THE DECISION LIVES HERE, NOT IN A FOLDER. `processed/` is rebuilt from
+#    `assets/` on demand, so anything recorded by moving a file into a
+#    special folder there is lost the next time it is rebuilt. A line in
+#    this file survives.
+#
+# Keyed by FILENAME. Every entry needs a reason somebody can disagree with.
+
+ONEY_PT15020_cleaned_aux.xlsx:
+  deal: PT15020
+  reason: >-
+    OUR OWN output, not Oney's. Its columns are cutoff_principal, cutoff_fv,
+    country, default_date, reflect_id - this schema's vocabulary and an
+    internal system id, not a seller's. Loading it put four phantom
+    "published" totals into the strat scanner, every one matching the book
+    exactly, because the book is where they came from. Trap T55; detector
+    detect_derived_file flags this shape automatically.

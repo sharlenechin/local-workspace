@@ -1,0 +1,79 @@
+{
+ "_comment": "Edits the user made by hand in the Sigma editor (published v12, 2026-10-14), applied LAST by build_workbook.py so every rebuild keeps them. The page layout is user_layout.xml, read back from that version. Before a rebuild, diff the live workbook against contents.json and add new hand edits here.",
+ "elements": {
+  "h_sub": {
+   "body": "<span style=\"color: #5C6B66\">Snowflake PROD · NPL\\_COMMON · From Jun 2014 </span>"
+  },
+  "port_title": {
+   "body": "## **Portfolio Overview**",
+   "verticalAlign": "center"
+  },
+  "f_show": {
+   "name": "Show By"
+  },
+  "f_showby": {
+   "name": "Group By",
+   "source.labels": [
+    "Portfolio",
+    "Combined REF"
+   ]
+  },
+  "h_clear": {
+   "align": "center"
+  },
+  "band": {
+   "style.borderRadius": "pill"
+  },
+  "port_bar": {
+   "style.borderRadius": "pill"
+  },
+  "k_pf": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  },
+  "k_cf": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  },
+  "k_ov": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  },
+  "k_cs": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  },
+  "k_bs": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  },
+  "k_fc": {
+   "name.fontSize": 14,
+   "value.fontSize": 26,
+   "layout": {
+    "anchor": "center"
+   },
+   "style.borderRadius": "pill"
+  }
+ }
+}

@@ -1,0 +1,75 @@
+{
+  // Open THIS FILE in VS Code (File > Open Workspace from File...), not the
+  // ~/data-warehouse folder.
+  //
+  // Why: VS Code only reads `.vscode/settings.json` from a workspace folder
+  // *root*. Opening ~/data-warehouse makes the root the parent directory, so
+  // local-workspace/.vscode/settings.json is never loaded and notebooks get
+  // no default interpreter. Listing the two workspaces as folders here makes
+  // each one a root, so each keeps its own settings — the local-workspace
+  // venv stays scoped to local-workspace and does not leak into brocc-data.
+  "folders": [
+    { "name": "local-workspace", "path": "local-workspace" },
+    { "name": "brocc-data", "path": "brocc-data" },
+		{
+			"name": "npl-underwriting",
+			"path": "npl-underwriting"
+		},
+    { "name": "asset-index-cloud", "path": "asset-index-cloud" }
+  ],
+  // Only settings that CANNOT be scoped to one folder belong here — anything
+  // in this block applies to both workspaces. Interpreter and Jupyter
+  // settings deliberately stay in local-workspace/.vscode/settings.json.
+  "settings": {
+    // Autosave. `files.autoSave` is window-scoped, so VS Code ignores it in
+    // a folder-level settings.json — this file is the narrowest place it
+    // actually takes effect. It only saves; it never stages or commits, so
+    // brocc-data is unaffected beyond files hitting disk sooner.
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+
+    // ---- .sql language mode, per folder ---------------------------------
+    // `files.associations` is WINDOW-scoped, and silently so: VS Code reads
+    // it with a bare getValue() (no resource) and registers every pattern in
+    // ONE flat global registry. A folder-level .vscode/settings.json entry is
+    // therefore ignored outright -- which is why both folders' "*.sql" rules
+    // did nothing and every .sql in the window fell through to the Snowflake
+    // extension's own `snowflake-sql` contribution, brocc-data models
+    // included.
+    //
+    // So the pattern has to carry the path; "*.sql" cannot mean two things in
+    // one registry. Absolute, for the same reason the dbt paths below are.
+    //
+    // The language IDs are load-bearing and NOT interchangeable:
+    //   snowflake-sql -> Snowflake extension. Every command and code lens it
+    //                    ships is gated on `editorLangId == 'snowflake-sql'`.
+    //                    Plain `sql` gets none of them: no Run button.
+    //   jinja-sql     -> dbt Power User, so ref()/source() resolve.
+    "files.associations": {
+      "/Users/sharlenechin/data-warehouse/brocc-data/**/*.sql": "jinja-sql",
+      "/Users/sharlenechin/data-warehouse/local-workspace/**/*.sql": "snowflake-sql"
+    },
+
+    // ---- dbt Power User -------------------------------------------------
+    // Every dbt.* setting except deferConfigPerProject is WINDOW-scoped, so
+    // VS Code ignores it in a folder-level .vscode/settings.json. This file
+    // is the narrowest place they actually take effect -- which is also why
+    // allowListFolders below matters.
+    //
+    // Confines Power User to brocc-data. Without it, a window-scoped
+    // extension is free to scan every root, including local-workspace.
+    // ABSOLUTE path required: relative entries are joined to each workspace
+    // root and any that do not exist are silently dropped -- and an empty
+    // list means "no filtering", so a wrong relative path would quietly
+    // give Power User the whole window.
+    "dbt.allowListFolders": [
+      "/Users/sharlenechin/data-warehouse/brocc-data"
+    ],
+    "dbt.dbtIntegration": "core",
+    // Absolute for the same existsSync() reason as in
+    // brocc-data/.vscode/settings.json.
+    "dbt.dbtPythonPathOverride": "/Users/sharlenechin/data-warehouse/brocc-data/transformation/dbt/.venv/bin/python",
+    "dbt.enableNewLineagePanel": true,
+    "dbt.lineage.showNonSelectEdges": true
+  }
+}

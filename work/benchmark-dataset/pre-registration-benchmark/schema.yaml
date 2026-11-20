@@ -1,0 +1,154 @@
+# The output contract. THE SINGLE SOURCE OF TRUTH.
+#
+# TWO TABLES, and the split is the point.
+#
+#   accounts    a FIXED, narrow core. One row per loan. These eighteen columns
+#               are the ones every consumer can rely on existing, with the same
+#               meaning, on every deal in the country.
+#
+#   additional_   an OPEN long table. One row per loan per fact:
+#   attributes  deal_id, loan_id, column_name, column_value, column_type.
+#               Everything else a seller ships lands here.
+#
+# !! WHY, AND WHAT THIS REPLACES. The old contract was a 26-column superset and
+#    it grew every time a seller shipped something new - a deceased flag wanted
+#    by five deals, a fee column by two, an insolvency date by two. Each addition
+#    widened the table for all twelve deals, left it null on most of them, and
+#    forced a schema version, a re-run and a re-approval on deals that had not
+#    changed. A superset that grows with every tape is not a contract.
+#
+#    The core answers "what is this loan and what is owed". The long table
+#    absorbs everything else WITHOUT a schema change: a new fact is a registry
+#    row and nothing more. Null in the core now means one thing only - the tape
+#    does not carry it - rather than "some other seller had this".
+#
+# ADDING A FACT, the whole procedure:
+#   1  add a mappings.csv row for the deals whose tape carries it
+#   2  re-run those deals
+#   3  `uv run python scripts/backtest.py`     (prove nothing else moved)
+#   No schema edit. No version bump. No other deal touched.
+#
+# ADDING A CORE COLUMN is deliberately harder, because it is a promise to every
+# consumer: edit `columns` below, snapshot, re-run ALL deals, and expect every
+# existing approval to go stale. Do it only when a fact is universal.
+
+version: 4
+country: PT
+
+# ---- the fixed core: one row per loan -------------------------------------
+columns:
+  - {name: unique_key,        type: string,  null_means: "never null. OURS, not the seller's - a hash of deal + file + sheet + row. It was called `account_key` until 2026-10-12, which read like the seller's account number and is not: it identifies a ROW OF THE SOURCE and means nothing outside these files. The only key that exists for EVERY loan, including the 106 PT15018 loans with no account number and all of PT20008, which is anonymised. Stable while the tape is; changes when the source row does"}
+  - {name: deal_id,            type: string,  null_means: never null}
+  - {name: deal_type,          type: enum,    null_means: "not established. How INTRUM acquired the book, at their own underwriting - `one_off` (bought once, a closed population) or `forward_flow` (delivered monthly under a contract). NOT how Brocc acquired it: Brocc bought every Portuguese deal in one 2025-12-01 transaction, so prod calls them all one-off. Only a one-off has a single tape that can BE the book; a forward flow has a seller SAMPLE at contract signing and monthly tranches after, so a tape that covers part of it is correct, not missing."}
+  - {name: grain,            type: enum,    null_means: "never null. THE ONE COLUMN THAT JOINS ALL THREE OUTPUTS for this deal - `loan_id`, `client_id` or `unique_key` - and the same value in accounts, additional_attributes and payments. It is NOT always the loan: where a seller records collections against the BORROWER, payments can never be pushed to the account (T69), so the only column all three share is `client_id`. Read this first, then join on the column it names."}
+  - {name: offer_stage,        type: enum,    null_means: "never null; `unknown` where the filename is silent"}
+  - {name: verification_status,type: enum,    null_means: "never null; set from the guard result, never by hand"}
+  - {name: loan_id,            type: string,  null_means: "the tape carries no account number for this loan"}
+  - {name: client_id,          type: string,  null_means: the sheet does not identify a borrower}
+  - {name: currency_id,        type: string,  null_means: never null}
+  - {name: country,            type: string,  null_means: "never null. From deals.csv - a property of the DEAL, like the seller and the cut-off, never read off a sheet"}
+  - {name: segment,            type: string,  null_means: the tape has no scope/segment column}
+  - {name: cutoff_date,        type: date,    null_means: "the deal's cut-off is not known. From deals.csv, never from a sheet"}
+  - {name: cutoff_balance,     type: numeric, null_means: "the seller never published a TOTAL owed. Not a gap in our reading - the figure does not exist on the tape. NEVER derived: not principal + interest + fee"}
+  - {name: cutoff_principal,   type: numeric, null_means: "not stated separately from the total. NEVER derived: not balance minus interest"}
+  - {name: cutoff_interest,    type: numeric, null_means: "not stated. NEVER derived: not balance minus principal. Fees are NOT folded in here - they have their own field, cutoff_other_fee, since 2026-10-12"}
+  - {name: cutoff_other_fee,  type: numeric, null_means: "not stated separately. Everything the loan owes at cut-off that is NOT principal and NOT interest - court costs, collection fees, VAT, penalties, `other`. ONE field because sellers split these differently and a column per fee name could never be compared across books; the seller's own column name stays in the registry, so nothing about their wording is lost. NEVER a plug: if the tape does not state it, this is null, NOT balance minus principal minus interest."}
+  - {name: origination_amount, type: numeric, null_means: "seller wrote 'Not Available'. A real 0 is an overdraft, not a gap"}
+  - {name: origination_date,   type: date,    null_means: not stated}
+  - {name: default_date,       type: date,    null_means: not stated}
+  - {name: loan_holder_individual_flag, type: boolean, null_means: borrower type not stated}
+  - {name: loan_holder_corporate_flag,  type: boolean, null_means: borrower type not stated}
+  - {name: product_type,       type: string,  null_means: not stated}
+  - {name: source,             type: string,  null_means: never null}
+
+# ---- additional_attributes: the open long table, one row per loan per fact -
+# A row exists ONLY where the deal has a value. Absence means the tape does not
+# carry that fact for that loan - there are no null rows to interpret.
+additional_attributes:
+  - {name: deal_id,      type: string, null_means: never null}
+  - {name: unique_key,  type: string, null_means: "never null. JOIN ON THIS - loan_id can be null and on PT20008 always is"}
+  - {name: loan_id,      type: string, null_means: "the tape carries no account number for this loan. Present for convenience; never the join key"}
+  - {name: client_id,    type: string, null_means: "the sheet does not identify a borrower, or this deal maps none. Present for convenience, so a PERSON-level fact can be grouped by person without joining back to accounts - several of these facts ARE person-level (PT15018's judicialised flag, its insolvency and court dates). Never the join key: like loan_id it can be null, and on PT20008 both always are"}
+  - {name: grain,        type: enum,   null_means: "never null. The same value as in accounts and payments: which column joins this deal's three outputs"}
+  - {name: column_name,  type: string, null_means: never null}
+  - {name: column_value, type: string, null_means: "never null - a row exists only where there is a value"}
+  - {name: column_type,  type: enum,   null_means: "never null; text | amount | date | boolean. How to READ column_value"}
+
+# Facts that moved OUT of the core into `additional_attributes` at version 4. Listed so the
+# move is legible, NOT to constrain what may appear - the table is open.
+additional_attributes_seen:
+  - borrower_type         # the seller's OWN word for who holds the loan -
+                          # `Company`, `Individual`, `ENI`. The two holder
+                          # flags are read FROM it, so keeping it lets a
+                          # reader check that reading
+  - claims_balance        # an amount CLAIMED in a proceeding, never a balance
+                          # owed, and used only where the tape does NOT say
+                          # which proceeding - PT15018 mixes insolvency and
+                          # judicial claims on the same column
+  - insolvency_claims_balance   # a claim lodged in an INSOLVENCY, recovered
+                          # through the administrator and ranking against the
+                          # estate
+  - judicialised_flag     # null means NOT KNOWN, never 'not judicialised'
+  - judicial_start_date   # when court proceedings began. A SEPARATE concept
+                          # from insolvency: a loan can be in court without
+                          # the borrower being insolvent, and insolvent
+                          # without anyone going to court
+  - judicial_end_date     # when they closed. Absent means UNKNOWN, never
+                          # "still open"
+  - insolvent_flag
+  - insolvency_start_date  # when the insolvency period began. WHICH event
+                           # that is depends on the seller and sometimes on
+                           # the jurisdiction - a declaration, or the start
+                           # of a discharge period. The registry note on
+                           # each row says which, and the country's
+                           # CONTEXT.md says what the words mean there
+  - insolvency_end_date    # when it ended. Absent means UNKNOWN, never
+                           # "still ongoing"
+  - product_description
+  - detail_level          # `full` or `basic`: is this loan on the detailed sheet
+  - loan_id_missing_flag
+
+# !! PAYMENTS HAD NO CONTRACT AT ALL, and drifted into three shapes: some
+#   files keyed `loan_id`, some `client_id`, and only PT18019 carried
+#   `period`. A consumer reading all five had to handle each separately, and
+#   nothing said which shape to expect. accounts and additional_attributes
+#   were pinned from the start; this was not.
+#
+# !! THE GRAIN IS THE SELLER'S, AND IT IS NOT ALWAYS THE LOAN. Two tapes
+#   record collections against the BORROWER, not the account - and those
+#   borrowers hold 1.81 and 1.76 loans each. Splitting one payment across a
+#   person's loans would be an allocation nobody can defend, the same error
+#   as filling in a balance. So a client-grain file leaves `loan_id` NULL,
+#   which says plainly: this money cannot be attributed to one account.
+#   Both columns always exist; `grain` says which one carries the key.
+# !! HOW THE THREE OUTPUTS JOIN, which must be the same on every deal or a
+#   consumer has to learn each book separately.
+#
+#     accounts  <->  additional_attributes     ALWAYS on `unique_key`
+#         It is ours, never null, unique per loan, and present on every deal
+#         including PT20008 where the seller gives no identifier at all.
+#         loan_id and client_id ride along in the long table for convenience
+#         - group a person-level fact by person without a join back - but
+#         they are NEVER the join: both can be null.
+#
+#     accounts  <->  payments                  on the column `payments.grain` NAMES
+#         Payments cannot carry unique_key: where the seller records
+#         collections against the BORROWER, one payment belongs to several
+#         loans and no row-level key exists for it (T69). So the payments
+#         file says which column carries its key, and that column is
+#         guaranteed populated in accounts - enforced by the `payments join`
+#         guard, not left to luck.
+#
+#   NEVER coalesce the two ids to force a single join. A loan number and a
+#   client number are different namespaces; coalescing them matches on
+#   whichever happens to be present and would silently pair a loan on one
+#   side with a borrower on the other the day two values collide.
+payments:
+  - {name: deal_id,        type: string,  null_means: never null}
+  - {name: grain,          type: enum,    null_means: "never null. `loan_id` or `client_id` - which column below carries the key, decided from the seller's own payment cells by VALUE OVERLAP, never by column name"}
+  - {name: loan_id,        type: string,  null_means: "this seller records collections against the BORROWER, not the account. NEVER filled by spreading a client's payment over their loans"}
+  - {name: client_id,      type: string,  null_means: "this seller records collections against the ACCOUNT - the finer grain, and the better one"}
+  - {name: payment_month,  type: string,  null_means: "the seller dates payments RELATIVE to the cut-off and this deal has no cut-off date, so there is nothing to anchor them to. See `period`"}
+  - {name: period,         type: string,  null_means: "the seller gave an absolute month, so no relative label exists. See `payment_month`"}
+  - {name: payment_amount, type: numeric, null_means: "never null. SIGNED and NET: positive is money received on this book, negative a refund. The seller's own sign convention is normalised first, from the majority sign, and recorded in the metadata"}
+

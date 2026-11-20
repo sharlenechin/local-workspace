@@ -1,0 +1,30 @@
+{
+ "_comment": "Edits the user made by hand in the Sigma editor. build_workbook.py applies them LAST, after Title Case, so their wording and choices survive every rebuild. Before a rebuild, diff the live workbook against contents.json and add new hand edits here. 2026-10-09: the manager's review removed the jitter option, the behaviour key text and the key table (6kmnYaGsXV); their edits went with them. 2026-10-12: the user's artifact replaced the behaviour picker and the area chart with one five-line chart, so the c_beh labels and the c_chart area style went with them. 2026-10-12: the two Cases section-band texts (MxSGmmb_TV, nSopK5b7To) are now built by build_workbook.py, with the snapshot month and the period line the user asked for. 2026-10-12: Comparison Window - the cards show the latest reporting month, so the p_coll and p_avg notes were reworded to match (they said 'over Selected Window Timeframe'). 2026-10-12: the Average Monthly Collections card was removed (redundant with the % on Total Collections), so its note went with it. 2026-10-14 (v60): the user made the three band subtitles (bp_sub, bc_sub, bd_sub) large paragraphs and put the Data Quality one in Title Case.",
+ "elements": {
+  "c_window": {
+   "value": "Last 3 months"
+  },
+  "p_coll": {
+   "description.text": "Total Collections in the Latest Reporting Month"
+  },
+  "p_cost": {
+   "description.text": "Servicer Cost"
+  },
+  "p_gap": {
+   "description.text": "Collections minus the Chosen Forecast · Negative Means Behind Plan"
+  },
+  "p_net": {
+   "description.text": "Collections Minus Servicer Cost"
+  },
+  "bp_sub": {
+   "body": "<p class=\"p-large\"><span style=\"color: #D8E494\">**Summary**</span></p>"
+  },
+  "bc_sub": {
+   "body": "<p class=\"p-large\"><span style=\"color: #D8E494\">**Summary**</span></p>"
+  },
+  "bd_sub": {
+   "body": "<p class=\"p-large\"><span style=\"color: #D8E494\">**Data Quality: Reconciliation and Case Feeds**</span></p>"
+  }
+ },
+ "extra_elements": []
+}

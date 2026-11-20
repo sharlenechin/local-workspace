@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page type="grid" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto" id="pg_main">
+  <Container elementId="band" type="grid" gridColumn="1 / 25" gridRow="1 / 12" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto">
+    <Element elementId="band_sub" gridColumn="1 / 25" gridRow="1 / 2"/>
+    <Element elementId="k_cf" gridColumn="1 / 9" gridRow="2 / 7"/>
+    <Element elementId="k_pf" gridColumn="9 / 17" gridRow="2 / 7"/>
+    <Element elementId="k_fc" gridColumn="17 / 25" gridRow="2 / 7"/>
+    <Element elementId="k_ov" gridColumn="1 / 9" gridRow="7 / 12"/>
+    <Element elementId="k_cs" gridColumn="9 / 17" gridRow="7 / 12"/>
+    <Element elementId="k_bs" gridColumn="17 / 25" gridRow="7 / 12"/>
+  </Container>
+  <Container elementId="port_bar" type="grid" gridColumn="1 / 25" gridRow="12 / 15" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto">
+    <Element elementId="port_title" gridColumn="1 / 11" gridRow="1 / 4"/>
+    <Element elementId="f_showby" gridColumn="11 / 17" gridRow="1 / 4"/>
+    <Element elementId="f_show" gridColumn="17 / 25" gridRow="1 / 4"/>
+  </Container>
+  <TabbedContainer elementId="tabs" type="tabbed-container" gridColumn="1 / 25" gridRow="15 / 49">
+    <Tab gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto">
+      <Element elementId="t_port" gridColumn="1 / 25" gridRow="1 / 34"/>
+    </Tab>
+    <Tab gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto">
+      <Element elementId="t_ref" gridColumn="1 / 25" gridRow="1 / 34"/>
+    </Tab>
+  </TabbedContainer>
+  <Container elementId="notes_box" type="grid" gridColumn="1 / 25" gridRow="49 / 63" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto">
+    <Element elementId="notes" gridColumn="1 / 25" gridRow="1 / 14"/>
+  </Container>
+</Page>
+<Page type="grid" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto" id="pg_model">
+  <Element elementId="src" gridColumn="1 / 25" gridRow="1 / 12"/>
+  <Element elementId="ref_src" gridColumn="1 / 25" gridRow="12 / 24"/>
+  <Element elementId="pm_rows" gridColumn="1 / 25" gridRow="60 / 72"/>
+  <Element elementId="ref_rows" gridColumn="1 / 25" gridRow="72 / 84"/>
+  <Element elementId="pm_by_port" gridColumn="1 / 25" gridRow="24 / 36"/>
+  <Element elementId="ref_by_ref" gridColumn="1 / 25" gridRow="36 / 48"/>
+  <Element elementId="t_tiles" gridColumn="1 / 25" gridRow="48 / 60"/>
+</Page>
+<Panel type="grid" gridTemplateColumns="repeat(24, 1fr)" gridTemplateRows="auto" id="hdr">
+  <Element elementId="h_title" gridColumn="1 / 13" gridRow="1 / 3"/>
+  <Element elementId="h_sub" gridColumn="1 / 8" gridRow="3 / 4"/>
+  <Element elementId="f_servicer" gridColumn="1 / 4" gridRow="4 / 7"/>
+  <Element elementId="f_country" gridColumn="4 / 7" gridRow="4 / 7"/>
+  <Element elementId="f_deal" gridColumn="7 / 10" gridRow="4 / 7"/>
+  <Element elementId="f_portfolio" gridColumn="10 / 13" gridRow="4 / 7"/>
+  <Element elementId="f_price" gridColumn="13 / 16" gridRow="4 / 7"/>
+  <Element elementId="f_range" gridColumn="16 / 20" gridRow="4 / 7"/>
+  <Element elementId="h_clear" gridColumn="20 / 22" gridRow="4 / 7"/>
+  <Element elementId="f_months" gridColumn="1 / 10" gridRow="7 / 9"/>
+</Panel>

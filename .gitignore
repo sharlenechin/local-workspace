@@ -1,0 +1,103 @@
+# local-workspace: code and notes only. Nothing a seller, a servicer or the warehouse sent us,
+# and nothing we exported from it, goes into git. When in doubt, it stays out.
+
+# --- Environment and tooling ----------------------------------------------------------------
+.venv
+.env
+.env.*
+mise.local.toml
+mise.*.local.toml
+.ipynb_checkpoints
+__pycache__
+.ruff_cache
+*.pyc
+.DS_Store
+.build/
+.claude/settings.local.json
+
+# --- Data files, by format: never committed -------------------------------------------------
+# Spreadsheets
+*.xlsx
+*.xlsm
+*.xlsb
+*.xls
+*.ods
+*.csv
+*.tsv
+# Columnar and binary data
+*.parquet
+*.feather
+*.arrow
+*.avro
+*.orc
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.db
+*.duckdb
+*.sqlite
+*.sqlite3
+# Documents a data room ships with
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.msg
+*.eml
+# Archives, which usually wrap one of the above
+*.zip
+*.gz
+*.7z
+*.rar
+*.tar
+# Images and exports
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
+# JSON is data by default here (canvases, strats, caches, extracts). The config files a
+# teammate needs are allowed back in below.
+*.json
+!.vscode/*.json
+!bootstrap/*.json
+!**/sigma_build/contents.json
+!**/sigma_build/element_ids.json
+!**/sigma_build/user_edits.json
+!**/sigma_build/workbook.json
+!**/sigma_theme.json
+!**/design/project/canvas.json
+
+# --- Folders that hold data whatever the file type ------------------------------------------
+# Seller tapes and servicer deliveries
+work/asset-index/sharepoint/
+work/workshop/asset-index/
+examples/asset-index-sharepoint-example/raw/
+examples/asset-index-sharepoint-example/sorted/
+examples/asset-index-sharepoint-example/relevant/
+# Query caches and run outputs
+**/.cache/
+**/data/
+**/raw/
+**/cleaned/
+**/output/
+**/outputs/
+**/strats/
+**/backtest-baseline/
+**/dictionaries/
+# Retired work keeps old extracts beside the code
+work/.archive/**/*.json
+
+# --- Notebooks -------------------------------------------------------------------------------
+# Notebooks are committed with their outputs stripped (see .gitattributes / nbstripout), so
+# no query result ends up in history.
+
+# Dashboard mockups and design exports embed real deal ids and figures
+*.html
+*.potx
+*.potm

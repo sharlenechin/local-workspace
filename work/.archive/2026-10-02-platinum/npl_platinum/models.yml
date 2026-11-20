@@ -1,0 +1,219 @@
+# ============================================================================
+# NPL PLATINUM. The general-purpose layer: two dimensions, one status history
+# and three monthly aggregates, every amount in EUR beside its own currency.
+# ============================================================================
+# Not dashboard-specific. Currency stays in the grain of the aggregates and no
+# acquisition floor is applied, so a consumer chooses both deliberately.
+# The Sigma-shaped models are in marts/mart_servicing_dashboard.
+# ============================================================================
+models:
+- name: dim_npl_platinum_portfolio
+  description: "PLATINUM. One row per portfolio, deduped, with the whole drill path resolved --\
+    \ seller, legal buyer (vehicle), project, deal, servicer, region, country -- plus the purchase\
+    \ economics. 264 rows: 263 real and one sentinel for fact rows whose portfolio_sk has no dimension\
+    \ row, which carries 6.38% of collections and whose name starts '(Unknown Portfolio'. THE\
+    \ TABLE TO JOIN TO: every other model in this layer carries portfolio_sk and nothing else.\
+    \ SERVICER is derived from deal source and country, not stored anywhere in the warehouse.\n\
+    \ There is NO Intrum-side date stored on the portfolio -- DIM_NPL_PORTFOLIO carries exactly\
+    \ one date, CAPEX_DATE, and it is Brocc's. SERVICER_FIRST_REGISTRATION_DATE and SERVICER_LAST_REGISTRATION_DATE\
+    \ are DERIVED from the loans on the book and are a RANGE, not an event; they inherit the instability\
+    \ of the case-level registration date, which moves on 19.9% of loans. A portfolio is often\
+    \ a BUNDLE of batches bought decades apart: 16 books span more than one legacy vintage year\
+    \ and the widest spans 272 months. The LEGACY_ACQUISITION_* columns summarise that spread\
+    \ so a one-row-per-portfolio join still says the book is a bundle; dim_npl_platinum_portfolio_batch\
+    \ has the batches themselves."
+  config:
+    alias: dim_npl_platinum_portfolio
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+  columns:
+  - name: portfolio_sk
+    data_tests:
+    - not_null
+  - name: portfolio_name
+    data_tests:
+    - not_null
+    - unique
+- name: dim_npl_platinum_portfolio_batch
+  description: 'PLATINUM. One row per (portfolio_sk, batch_sk) -- the level at which a book was
+    actually bought, twice over. 11,999 rows across 264 portfolios. TWO ACQUISITION DATES AND
+    THEY ARE NOT THE SAME EVENT: BROCC_ACQUISITION_DATE is when Brocc bought the bundle (a portfolio
+    fact, identical on every batch) and LEGACY_ACQUISITION_DATE is when the previous owner bought
+    that batch (a batch fact, ranging 2001 to 2026). 21 of 264 portfolios hold more than one batch
+    and one holds 3,238, spanning 22 years of legacy vintages. ⚠ NOT a replacement for dim_npl_platinum_portfolio:
+    joining this on portfolio_sk alone multiplies money by 45x on average. Batch is NOT an attribute
+    of a case -- 12,897 loans sit in more than one batch -- so it must never be added to dim_npl_platinum_case.'
+  config:
+    alias: dim_npl_platinum_portfolio_batch
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - batch_sk
+- name: dim_npl_platinum_case
+  description: 'PLATINUM. One row per case_bk -- the loan -- carrying only what is static, plus
+    the status it holds today. 22,530,117 rows, collapsed from 154,077,844 versions. Two registration
+    dates, deliberately labelled and NOT interchangeable: SERVICER_REGISTRATION_DATE is when the
+    servicer opened the case, BROCC_REGISTRATION_DATE is when Brocc bought the book (the portfolio''s
+    capex date, derived -- nothing on the case records it). WARNING: the Intrum date is not stable,
+    moving across versions on 4,476,245 cases (19.9%) by an average of 1,142.7 days, so a vintage
+    cut built on it shifts between runs unless you pin which version you mean; SERVICER_REGISTRATION_DATE_FIRST
+    and REGISTRATION_DATE_MOVED_FLAG exist for that. Status HISTORY is in fct_npl_platinum_case_status,
+    not here.
+
+    '
+  config:
+    alias: dim_npl_platinum_case
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - case_bk
+  columns:
+  - name: case_bk
+    data_tests:
+    - not_null
+  - name: case_sk
+    data_tests:
+    - not_null
+    - unique
+- name: fct_npl_platinum_case_status
+  description: 'PLATINUM. One row per status SPELL -- every time a loan''s status code actually
+    changed, with the date it changed, the date it changed again, and WHAT THE CODE MEANS. 81,602,905
+    spells over 22,530,117 loans. Consecutive versions holding the same code are collapsed, so
+    a loan restated forty times without moving status gets one row, not forty. Separate from dim_npl_platinum_case
+    because status changes on 52.6% of loans. THE DECODE COMES FROM INTRUM''S OWN 103-CODE LIST,
+    inlined, because the warehouse has none: STATUS_DESCRIPTION, CLOSING_CODE, CLOSING_DESCRIPTION
+    and CLOSING_CATEGORY are 100% NULL on all 22.5m rows. It decodes 94.5% of spells into 69 distinct
+    descriptions; the rest are three word-valued statuses Intrum''s list does not contain (''Active'',
+    ''Closed'', ''Open''), code 99, and cases with no status. IS_STATUS_DECODED_FLAG marks the
+    hits. ⚠ The join TRIMS both sides -- status_code carries trailing spaces, and untrimmed ''2
+    '' and ''2'' are different codes. ⚠ A decoded status is the action Intrum recorded, NOT a
+    legal stage: it does not say whether a case is amicable, legal or insolvent. ⚠ In brocc-data
+    the code list should become a SEED rather than the inlined VALUES block used here.'
+  config:
+    alias: fct_npl_platinum_case_status
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - case_bk
+        - spell_sequence
+  columns:
+  - name: case_bk
+    data_tests:
+    - not_null
+  - name: spell_start_date
+    description: 'NULL on 1,466 rows whose source version carries no effective_from_date. They
+      are ordered first within their loan so that exactly one spell per loan stays open.
+
+      '
+- name: fct_npl_platinum_case_collection_daily
+  description: 'PLATINUM. Every loan-level collection at the day it landed, one row per (portfolio_sk,
+    case_bk, collection_date, currency_id). 33,526,856 rows, collapsed from 134,171,285 raw rows
+    -- a loan often has several postings on one day. THE BASE OF THE LOAN-LEVEL CHAIN: the 134m-row
+    fact is scanned here once and nothing downstream touches it again. Keyed on case_bk, never
+    case_sk, which is a version key averaging 6.84 versions per loan. COLLECTIONS_EUR uses the
+    DAILY rate and must NOT be summed to a month -- the monthly model converts at the monthly
+    average, as every other platinum aggregate does. The daily rate starts 2018-01-02 while collections
+    start 2014-06-24, so 3,900,818 rows have no rate and a NULL EUR figure.'
+  config:
+    alias: fct_npl_platinum_case_collection_daily
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - case_bk
+        - collection_date
+        - currency_id
+- name: agg_npl_platinum_case_collection_monthly
+  description: PLATINUM. Loan-level collections rolled to the month with the payer-behaviour flags
+    attached per loan, one row per (portfolio_sk, case_bk, reporting_month, currency_id). 27,886,553
+    rows over 3,428,128 loans; verified unique on the full key. Reads the daily model and nothing
+    else. A ROW EXISTS ONLY WHERE THE LOAN PAID, so 'did not pay' is an absence -- which is why
+    LOST is a forward-dated LOST_AT_MONTH on the last paying row rather than a flag on a row that
+    does not exist. IS_ACTIVATED_FLAG fires once per loan ever; IS_NEW_FLAG fires on every return
+    after a two-month gap, so they are not the same thing. The flags carry no currency and repeat
+    across a two-currency month -- count distinct case_bk, never sum.
+  config:
+    alias: agg_npl_platinum_case_collection_monthly
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - case_bk
+        - reporting_month
+        - currency_id
+- name: agg_npl_platinum_portfolio_monthly
+  description: 'PLATINUM. The servicer''s own portfolio report summed to the month, one row per
+    (portfolio_sk, reporting_month, currency_id), in EUR and local currency. 6,905 rows. THE AUTHORITATIVE
+    CASH FIGURE -- agg_npl_platinum_case_payer_monthly is the loan-level view of the same money
+    and covers about half of it. Currency is in the grain so each rate applies to a single-currency
+    row; only the _EUR columns may be summed across currencies. Flows take rate_flow and stocks
+    take rate_stock; they differ by up to 1.70% in a month. No acquisition floor: this is full
+    servicer history, roughly eleven times Brocc''s own cash, so cut it with brocc_acquisition_month
+    in the consumer.
+
+    '
+  config:
+    alias: agg_npl_platinum_portfolio_monthly
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - reporting_month
+        - currency_id
+- name: agg_npl_platinum_forecast_monthly
+  description: 'PLATINUM. All three forecasts side by side, one row per (portfolio_sk, reporting_month,
+    currency_id), in EUR and local currency. 6,570 rows. UNDERWRITING is what we assumed when
+    we bought, ACCOUNTING is our current view and the one Finance tracks, SERVICER is the servicer''s
+    own plan -- three different questions, never to be averaged or swapped. The forecast facts
+    are NOT deduped upstream, unlike the portfolio snapshot, so a QUALIFY keeps the newest snapshot_version
+    per portfolio-month; version_count records how many existed and must never be summed. Forecast-driven,
+    so totals are higher than an actuals-driven view by design.
+
+    '
+  config:
+    alias: agg_npl_platinum_forecast_monthly
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - reporting_month
+        - currency_id
+- name: agg_npl_platinum_case_payer_monthly
+  description: 'PLATINUM. Payer behaviour and loan-level cash per portfolio per month, one row
+    per (portfolio_sk, reporting_month, currency_id), in EUR and local currency. 3,074 rows across
+    157 portfolios. This is agg_npl_platinum_case_collection_monthly counted up and nothing more
+    -- the chain is daily -> case-monthly -> here, and the 134m-row raw fact is read once at the
+    bottom. THE COUNTS ARE A FLOOR, NEVER A TOTAL: the loan feed covers about half of what the
+    servicer''s portfolio report shows, so a portfolio can show real cash beside zero payers.
+    Every count is COUNT(DISTINCT case_bk), not a sum of a flag, because the upstream flags repeat
+    across the rows of a two-currency month. LOST is counted at the month it is observed, not
+    the month of the last payment.'
+  config:
+    alias: agg_npl_platinum_case_payer_monthly
+    tags: npl_platinum
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - portfolio_sk
+        - reporting_month
+        - currency_id

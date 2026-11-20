@@ -1,0 +1,3138 @@
+{
+ "schemaVersion": 1,
+ "kind": "workbook",
+ "settings": {
+  "theme": {
+   "name": "aa9cb111-1b98-4cff-9a9c-43ff0fb3378f",
+   "overrides": {
+    "borderRadius": "round",
+    "categoricalScheme": [
+     "#4F3DFF",
+     "#1D5B4D",
+     "#A6ADF8",
+     "#012E26",
+     "#C62828",
+     "#2E7D32",
+     "#5C6B66",
+     "#E4E7FC",
+     "#8790AB",
+     "#F7F8FE"
+    ],
+    "colors": {
+     "highlight": "#1D5B4D",
+     "text": "#012E26"
+    },
+    "fonts": {
+     "dataFont": "FFF Acid Grotesk",
+     "textFont": "FFF Acid Grotesk"
+    },
+    "space": {
+     "showElementPadding": "shown",
+     "unit": "large"
+    },
+    "tableStyles": {
+     "autofitColumns": "shown",
+     "cellSpacing": "medium",
+     "gridLines": "horizontal",
+     "preset": "presentation",
+     "textStyles": {
+      "cell": {
+       "color": "#012E26",
+       "fontSize": 13
+      },
+      "header": {
+       "color": "#1D5B4D",
+       "fontSize": 12,
+       "fontWeight": "bold"
+      }
+     }
+    },
+    "titleFont": {
+     "color": "#012E26",
+     "fontSize": 16,
+     "fontWeight": "bold"
+    }
+   }
+  },
+  "navigation": {
+   "pageHeader": "enabled"
+  }
+ },
+ "pages": [
+  {
+   "id": "pg_main",
+   "name": "Servicer Data Quality",
+   "backgroundColor": "#FFFFFF",
+   "pageWidth": {
+    "mode": "custom",
+    "maxWidth": 1360
+   }
+  },
+  {
+   "id": "pg_model",
+   "name": "Model",
+   "visibility": "hidden"
+  }
+ ],
+ "panels": [
+  {
+   "id": "hdr",
+   "type": "header",
+   "title": "Header",
+   "pages": [
+    "pg_main"
+   ],
+   "config": {
+    "backgroundColor": "#FFFFFF",
+    "scroll": "sticky",
+    "borderStyle": "shadow"
+   }
+  }
+ ],
+ "elements": [
+  {
+   "id": "src",
+   "kind": "table",
+   "name": "Portfolio Months",
+   "source": {
+    "kind": "sql",
+    "connectionId": "b3be9b8b-fb38-4b05-a8db-afdb5c47cdbf",
+    "statement": "-- Data Quality dashboard: one row per portfolio x servicer x reporting month.\n--\n-- What it answers, per portfolio and month: did the servicer send its two feeds,\n-- and do they agree? Every tile and the By Portfolio table read this element.\n--\n--   Portfolio Feed   the servicer's monthly portfolio report   FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n--   Case Feed        one row per case per month-end            FCT_CASE_SNAPSHOT_DAILY\n--                    and the payments on those cases            FCT_CASE_COLLECTION\n--   Forecast         the servicer's own forecast                FCT_PORTFOLIO_FORECAST_SERVICER_SNAPSHOT_MONTHLY\n--\n-- Servicer is decided per combined ref (DIM_BATCH.BATCH_BK): the servicer the\n-- case feed names for that ref. No ref has ever had two (checked 2026-10-13),\n-- so a portfolio serviced by two firms splits cleanly into one row each: today\n-- only HEI-GR25001-U04 (2 Intrum refs, 1 Souq ref). A ref with no case feed\n-- takes its portfolio's servicer, and a portfolio with no case feed at all\n-- takes the manager's business rule (2026-10-12), as the Servicing dashboard.\n--\n-- Rows: every month from the first month either feed has, to the newest month\n-- in PROD, so a portfolio that stops reporting still has a row and reads\n-- \"Not Received\" instead of vanishing. Amounts stay in the portfolio's own\n-- currency (no portfolio reports two currencies in one month, checked\n-- 2026-10-13); the checks compare ratios, so no exchange rate is needed.\n--\n-- Scope (the manager, 2026-10-13): portfolios in DIM_PORTFOLIO only, from\n-- Jun 2014, the first month PROD holds a case feed. Earlier portfolio-feed\n-- months would read as missing case feeds the servicer never owed us.\n-- Case-feed rows on portfolio_sk '-1' (no portfolio: 3 Intrum refs, 7,694\n-- case-months, and 1 Gescobro ref, 30, on 2026-10-13) fall outside it.\n--\n-- Where the Servicing dashboard shows the same figure, this is built to match\n-- it: case feed collections and cases are the sums its dbt mart\n-- (MART_NPL_SERVICING_AGG_CASES_MONTHLY) holds, and collections_reconciled_flag\n-- is its month_reconciled_flag rule. tests/run.py checks both.\n--\n-- Measured 2026-10-13: (filled in by tests/run.py --doc)\n\nWITH portfolios_in_scope AS (\n    SELECT portfolio_sk, portfolio_bk, capex_date, capex_amount, currency_id\n    FROM PROD.NPL_COMMON.DIM_PORTFOLIO\n),\n\ncase_book_by_ref AS (\n    -- The Case Feed's book at each month-end, per combined ref. The table holds\n    -- one row per case per month (1,495,141,394 rows, all unique, 2026-10-13),\n    -- so COUNT(*) is the number of cases listed. Counting distinct cases\n    -- instead took 9 minutes. case_feed_rows counts every listed case, open or\n    -- closed: whether the case feed came at all.\n    --\n    -- Data-quality guard: the snapshot keeps a closed case on the list every\n    -- month after it closed, with its last balance. On 31 Aug 2026 9.0m of\n    -- Intrum's 19.5m listed cases were already closed, carrying 20.2bn, while\n    -- Intrum's own report counts 8.8m open cases. So the cases and balance\n    -- compared with the report leave closed cases out (case_book and\n    -- ref_months subtract closed_cases), and their balance is shown on its own\n    -- (closed_cases_balance). The Servicing dashboard's cases on book still\n    -- count them.\n    --\n    -- DIM_CASE has one row per version of a case (154,663,197 versions of\n    -- 22,486,377 cases, 2026-10-14) and the snapshot points at the version\n    -- valid at each month-end, so a case is closed at a month-end when that\n    -- version's closing date is on or before it. One read of the snapshot:\n    -- 474s against 823s for two (X-Small, 2026-10-14, same totals).\n    SELECT\n        s.batch_sk,\n        s.date_day                     AS reporting_month,\n        MAX(s.portfolio_sk)            AS portfolio_sk,\n        MAX(s.reporting_system_sk)     AS reporting_system_sk,\n        COUNT(*)                       AS case_feed_rows,\n        SUM(s.outstanding_total)       AS listed_balance,\n        COUNT(dc.case_sk)              AS closed_cases,\n        SUM(IFF(dc.case_sk IS NULL, 0, s.outstanding_total)) AS closed_cases_balance\n    FROM PROD.NPL_COMMON.FCT_CASE_SNAPSHOT_DAILY AS s\n    LEFT JOIN PROD.NPL_COMMON.DIM_CASE AS dc\n        ON dc.case_sk = s.case_sk AND dc.closing_date <= s.date_day\n    WHERE s.date_day BETWEEN '2014-06-30' AND CURRENT_DATE()\n      AND s.portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n    GROUP BY 1, 2\n),\n\nref_case_servicer AS (\n    -- The servicer the case feed names for each ref ('Unknown' is no answer).\n    SELECT c.batch_sk, MAX(c.portfolio_sk) AS portfolio_sk, MAX(INITCAP(rs.servicer_name)) AS servicer,\n           SUM(c.case_feed_rows) AS case_months\n    FROM case_book_by_ref AS c\n    INNER JOIN PROD.NPL_COMMON.DIM_REPORTING_SYSTEM AS rs\n        ON rs.reporting_system_sk = c.reporting_system_sk\n    WHERE rs.servicer_name <> 'Unknown'\n    GROUP BY 1\n),\n\nportfolio_case_servicer AS (\n    -- For refs the case feed does not name: the portfolio's main servicer.\n    SELECT portfolio_sk, MAX_BY(servicer, case_months) AS servicer\n    FROM ref_case_servicer\n    GROUP BY 1\n),\n\nportfolio_rule AS (\n    -- The manager's business rule (2026-10-12), copied from the Servicing\n    -- dashboard's portfolios_element.sql, for portfolios with no case feed.\n    SELECT\n        f.portfolio_sk,\n        CASE\n            WHEN ds.deal_source_name = 'ORGANIC ORIGINATED' AND f.country_code = 'UK' THEN 'Massey'\n            WHEN ds.deal_source_name = 'ORGANIC ORIGINATED' AND f.country_code = 'IT' THEN 'Fire'\n            WHEN ds.deal_source_name IN ('ORGANIC ORIGINATED', 'LEGACY', 'GESCOBRO')\n                 AND f.country_code = 'ES'                                          THEN 'Gescobro'\n            WHEN ds.deal_source_name = 'LEGACY' AND f.country_code = 'IT'           THEN 'Cerved'\n            ELSE 'Intrum'\n        END                                                 AS servicer\n    FROM (SELECT portfolio_sk,\n                 MAX_BY(deal_source_sk, period_end_date)    AS deal_source_sk,\n                 MAX(country_id)                            AS country_code\n          FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n          WHERE portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n          GROUP BY 1) AS f\n    LEFT JOIN PROD.NPL_COMMON.DIM_DEAL_SOURCE AS ds\n        ON ds.deal_source_sk = f.deal_source_sk\n),\n\nref_servicer AS (\n    -- One servicer per ref, from either feed, and where it came from.\n    SELECT\n        refs.batch_sk,\n        refs.portfolio_sk,\n        COALESCE(rcs.servicer, pcs.servicer, pr.servicer)   AS servicer,\n        IFF(rcs.servicer IS NOT NULL OR pcs.servicer IS NOT NULL,\n            'Case Feed', 'Business Rule')                   AS servicer_source\n    FROM (SELECT batch_sk, MAX(portfolio_sk) AS portfolio_sk\n          FROM (SELECT batch_sk, portfolio_sk FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n                WHERE portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n                UNION\n                SELECT batch_sk, portfolio_sk FROM case_book_by_ref)\n          GROUP BY 1) AS refs\n    LEFT JOIN ref_case_servicer AS rcs\n        ON rcs.batch_sk = refs.batch_sk\n    LEFT JOIN portfolio_case_servicer AS pcs\n        ON pcs.portfolio_sk = refs.portfolio_sk\n    LEFT JOIN portfolio_rule AS pr\n        ON pr.portfolio_sk = refs.portfolio_sk\n),\n\nportfolio_feed AS (\n    -- The Portfolio Feed, summed to the portfolio and servicer. refs_reported\n    -- counts the combined refs the report carried this month.\n    SELECT\n        f.portfolio_sk,\n        r.servicer,\n        f.period_end_date              AS reporting_month,\n        MAX(f.country_id)              AS country_code,\n        MAX(f.currency_id)             AS currency,\n        COUNT(DISTINCT f.batch_sk)     AS refs_reported,\n        SUM(f.gross_cash_recoveries)   AS portfolio_feed_collections,\n        SUM(f.total_balance)           AS portfolio_feed_balance\n    FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY AS f\n    INNER JOIN ref_servicer AS r\n        ON r.batch_sk = f.batch_sk\n    WHERE f.period_end_date BETWEEN '2014-06-30' AND CURRENT_DATE()\n    GROUP BY 1, 2, 3\n),\n\ncase_book AS (\n    -- The Case Feed's book, per portfolio and servicer. refs_matched counts the\n    -- refs that are in BOTH feeds this month: Massey's case feed uses refs its\n    -- report does not.\n    SELECT\n        c.portfolio_sk,\n        r.servicer,\n        c.reporting_month,\n        SUM(c.case_feed_rows)          AS case_feed_rows,\n        -- Every case listed, open or closed: the Servicing dashboard's cases on book.\n        SUM(c.case_feed_rows)                             AS case_feed_cases,\n        -- Open cases only, and their balance, the figures compared with the report (case_book_by_ref says why).\n        SUM(c.case_feed_rows - c.closed_cases)            AS case_feed_open_cases,\n        SUM(c.listed_balance - c.closed_cases_balance)    AS case_feed_balance,\n        SUM(c.closed_cases_balance)                       AS closed_cases_balance,\n        COUNT(DISTINCT pf.batch_sk)    AS refs_matched\n    FROM case_book_by_ref AS c\n    INNER JOIN ref_servicer AS r\n        ON r.batch_sk = c.batch_sk\n    LEFT JOIN (SELECT DISTINCT batch_sk, period_end_date\n               FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY) AS pf\n        ON pf.batch_sk = c.batch_sk AND pf.period_end_date = c.reporting_month\n    GROUP BY 1, 2, 3\n),\n\ncase_payments AS (\n    -- The Case Feed's payments, by the month they were paid. Bounded at today:\n    -- the table holds payments dated up to the year 4570 (2026-10-13).\n    -- Payments in a month with no feed row are not shown: the current month,\n    -- and payments dated before a portfolio's first feed month (Massey's\n    -- ORG-UK26002 pays from 2021; its case list starts Jan 2026).\n    -- Cerved and Gescobro have none in PROD: brocc-data does not load their\n    -- payments yet (int_npl_case_collection_conformed unions Intrum and Massey).\n    SELECT\n        p.portfolio_sk,\n        r.servicer,\n        LAST_DAY(p.collection_date)    AS reporting_month,\n        SUM(p.amount)                  AS case_feed_collections,\n        COUNT_IF(p.amount > 0)         AS case_feed_payments\n    FROM PROD.NPL_COMMON.FCT_CASE_COLLECTION AS p\n    INNER JOIN ref_servicer AS r\n        ON r.batch_sk = p.batch_sk\n    WHERE p.collection_date BETWEEN '2014-06-01' AND CURRENT_DATE()\n    GROUP BY 1, 2, 3\n),\n\nservicer_forecast AS (\n    -- Checked per portfolio: Cerved's forecast sits on one portfolio-level ref.\n    SELECT DISTINCT portfolio_sk, period_end_date AS reporting_month\n    FROM PROD.NPL_COMMON.FCT_PORTFOLIO_FORECAST_SERVICER_SNAPSHOT_MONTHLY\n    WHERE period_end_date >= '2014-06-30'\n),\n\nmonths AS (\n    -- Every month either feed has, up to today.\n    SELECT reporting_month FROM portfolio_feed\n    UNION\n    SELECT reporting_month FROM case_book\n),\n\nmonth_status AS (\n    -- A month is Complete once at least half as many portfolios report as the\n    -- month before: the Servicing dashboard's rule. Sep 2026 had 12 of 264 on\n    -- 2026-10-13, so it read Loading. The dashboard opens on the latest\n    -- Complete month.\n    SELECT\n        reporting_month,\n        IFF(LAG(COUNT(DISTINCT portfolio_sk)) OVER (ORDER BY reporting_month) IS NULL\n            OR COUNT(DISTINCT portfolio_sk) >= 0.5 * LAG(COUNT(DISTINCT portfolio_sk)) OVER (ORDER BY reporting_month),\n            'Complete', 'Loading')                          AS month_status\n    FROM portfolio_feed\n    GROUP BY 1\n),\n\ngrid AS (\n    -- One row per portfolio and servicer for every month from its first feed\n    -- month on.\n    SELECT s.portfolio_sk, s.servicer, m.reporting_month\n    FROM (SELECT portfolio_sk, servicer, MIN(reporting_month) AS first_month\n          FROM (SELECT portfolio_sk, servicer, reporting_month FROM portfolio_feed\n                UNION ALL\n                SELECT portfolio_sk, servicer, reporting_month FROM case_book)\n          GROUP BY 1, 2) AS s\n    INNER JOIN months AS m\n        ON m.reporting_month >= s.first_month\n),\n\nchecks AS (\n    SELECT\n        g.reporting_month,\n        g.portfolio_sk,\n        g.servicer,\n        LAST_DAY(d.capex_date)                              AS acquisition_month,\n        pf.portfolio_sk IS NOT NULL                         AS portfolio_feed_received_flag,\n        pf.refs_reported,\n        cb.refs_matched,\n        CASE\n            WHEN cb.case_feed_rows > 0 AND (pf.portfolio_sk IS NULL OR cb.refs_matched = pf.refs_reported)\n                                                  THEN 'Received'\n            WHEN cb.refs_matched > 0              THEN 'Partly Received'\n            WHEN cb.case_feed_rows > 0            THEN 'Under Another Ref'\n            -- Stopped: sent in an earlier month, not this one.\n            WHEN MAX(cb.reporting_month) OVER (PARTITION BY g.portfolio_sk, g.servicer ORDER BY g.reporting_month\n                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) IS NOT NULL\n                                                  THEN 'Stopped'\n            ELSE 'Not Received'\n        END                                                 AS case_feed_status,\n        pf.portfolio_feed_collections,\n        cp.case_feed_collections,\n        cp.case_feed_payments,\n        pf.portfolio_feed_balance,\n        cb.case_feed_balance,\n        cb.closed_cases_balance,\n        cb.case_feed_cases,\n        cb.case_feed_open_cases,\n        cb.portfolio_sk IS NOT NULL                         AS in_case_feed_flag,\n        sf.portfolio_sk IS NOT NULL                         AS forecast_received_flag\n    FROM grid AS g\n    LEFT JOIN portfolio_feed AS pf\n        ON pf.portfolio_sk = g.portfolio_sk AND pf.servicer = g.servicer AND pf.reporting_month = g.reporting_month\n    LEFT JOIN case_book AS cb\n        ON cb.portfolio_sk = g.portfolio_sk AND cb.servicer = g.servicer AND cb.reporting_month = g.reporting_month\n    LEFT JOIN case_payments AS cp\n        ON cp.portfolio_sk = g.portfolio_sk AND cp.servicer = g.servicer AND cp.reporting_month = g.reporting_month\n    LEFT JOIN servicer_forecast AS sf\n        ON sf.portfolio_sk = g.portfolio_sk AND sf.reporting_month = g.reporting_month\n    LEFT JOIN portfolios_in_scope AS d\n        ON d.portfolio_sk = g.portfolio_sk\n),\n\nhistory AS (\n    SELECT\n        c.*,\n        -- Each feed's dates: first month ever, and last month up to this row.\n        MIN(IFF(c.portfolio_feed_received_flag, c.reporting_month, NULL)) OVER (PARTITION BY c.portfolio_sk, c.servicer)\n                                                            AS portfolio_feed_first_month,\n        MIN(IFF(c.in_case_feed_flag, c.reporting_month, NULL)) OVER (PARTITION BY c.portfolio_sk, c.servicer)\n                                                            AS case_feed_first_month,\n        MAX(IFF(c.portfolio_feed_received_flag, c.reporting_month, NULL)) OVER (\n            PARTITION BY c.portfolio_sk, c.servicer ORDER BY c.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS portfolio_feed_last_month,\n        MAX(IFF(c.in_case_feed_flag, c.reporting_month, NULL)) OVER (\n            PARTITION BY c.portfolio_sk, c.servicer ORDER BY c.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS case_feed_last_month,\n        -- Months Overlap, up to this row: months the portfolio feed came, and\n        -- how many of them also had a case feed.\n        SUM(IFF(c.portfolio_feed_received_flag, 1, 0)) OVER (\n            PARTITION BY c.portfolio_sk, c.servicer ORDER BY c.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS months_reported_to_date,\n        SUM(IFF(c.portfolio_feed_received_flag AND c.in_case_feed_flag, 1, 0)) OVER (\n            PARTITION BY c.portfolio_sk, c.servicer ORDER BY c.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS months_overlap_to_date,\n        -- The Servicing dashboard's coverage test, per portfolio: months with a\n        -- case payment, out of months reported, both since acquisition.\n        COUNT_IF(c.case_feed_payments > 0 AND c.reporting_month >= c.acquisition_month)\n            OVER (PARTITION BY c.portfolio_sk, c.servicer)  AS case_payment_months_since_acquisition,\n        COUNT_IF(c.portfolio_feed_received_flag AND c.reporting_month >= c.acquisition_month)\n            OVER (PARTITION BY c.portfolio_sk, c.servicer)  AS reported_months_since_acquisition\n    FROM checks AS c\n)\n\nSELECT\n    h.reporting_month,\n    COALESCE(ms.month_status, 'Loading')                    AS month_status,\n    h.portfolio_sk,\n    h.servicer,\n    MAX(rs.servicer_source) OVER (PARTITION BY h.portfolio_sk, h.servicer) AS servicer_source,\n    d.portfolio_bk                                          AS portfolio_name,\n    -- The deal as the Servicing dashboard names it (its portfolios_element.sql).\n    COALESCE(dd.deal_alias, dd.deal_bk, 'Unknown')          AS deal,\n    COALESCE(co.country_name, pc.country_code)              AS country_name,\n    pc.currency,\n    d.capex_amount                                          AS purchase_price,\n    d.currency_id                                           AS purchase_currency,\n    h.acquisition_month,\n    h.portfolio_feed_received_flag,\n    -- Not Yet Received: a report is due by the 15th of the month after (every\n    -- Intrum report since Feb 2026 reached the warehouse between the 10th and\n    -- the 14th, 2026-10-14). Before then a missing report is not yet late.\n    CURRENT_DATE() >= DATEADD(DAY, 15, h.reporting_month)   AS portfolio_feed_due_flag,\n    h.refs_reported,\n    h.refs_matched,\n    h.case_feed_status,\n    -- Not the servicer's fault: brocc-data does not load Cerved's or Gescobro's\n    -- case payments into PROD yet (int_npl_case_collection_conformed unions\n    -- only Intrum and Massey; RAW holds both servicers' payments, 2026-10-13).\n    -- Nor all of Intrum's Italian ones: CAT 4034 has no orig_tr_id, so\n    -- int_npl_case_collection_intrum keeps one payment per case (raw 2,850\n    -- Dec 2025 - Aug 2026, PROD 1,041). The Servicing dashboard never\n    -- reconciles Italy for this (the user, 2026-10-14); same here. Their\n    -- collections cannot be compared, so the dashboard says so instead of\n    -- flagging them. Turn each off when brocc-data fixes it.\n    h.servicer NOT IN ('Cerved', 'Gescobro')\n        AND COALESCE(pc.country_code, '') <> 'IT'          AS case_payments_loaded_flag,\n    h.portfolio_feed_collections,\n    h.case_feed_collections,\n    h.portfolio_feed_balance,\n    h.case_feed_balance,\n    h.closed_cases_balance,\n    h.case_feed_cases,\n    h.case_feed_open_cases,\n    h.forecast_received_flag,\n    h.portfolio_feed_first_month,\n    h.case_feed_first_month,\n    h.portfolio_feed_last_month,\n    h.case_feed_last_month,\n    h.months_reported_to_date,\n    h.months_overlap_to_date,\n    h.case_payment_months_since_acquisition,\n    h.reported_months_since_acquisition,\n    -- Reconciled, the Servicing dashboard's rule: the case feed's collections\n    -- are within 10% of the portfolio feed's, and the case feed has payments in\n    -- at least 80% of the months reported since acquisition.\n    COALESCE(h.case_feed_collections IS NOT NULL\n        AND ABS(h.portfolio_feed_collections - h.case_feed_collections)\n            <= 0.10 * ABS(NULLIF(h.portfolio_feed_collections, 0))\n        AND h.case_payment_months_since_acquisition >= 0.80 * h.reported_months_since_acquisition\n        -- Italy: never, as the Servicing dashboard (see case_payments_loaded_flag).\n        AND COALESCE(pc.country_code, '') <> 'IT',\n        FALSE)                                              AS collections_reconciled_flag\nFROM history AS h\nLEFT JOIN month_status AS ms\n    ON ms.reporting_month = h.reporting_month\nLEFT JOIN (SELECT portfolio_sk, servicer, MAX(servicer_source) AS servicer_source\n           FROM ref_servicer GROUP BY 1, 2) AS rs\n    ON rs.portfolio_sk = h.portfolio_sk AND rs.servicer = h.servicer\nLEFT JOIN (SELECT portfolio_sk, MAX(country_id) AS country_code, MAX(currency_id) AS currency,\n                  MAX(deal_sk) AS deal_sk\n           FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY GROUP BY 1) AS pc\n    ON pc.portfolio_sk = h.portfolio_sk\nINNER JOIN portfolios_in_scope AS d\n    ON d.portfolio_sk = h.portfolio_sk\nLEFT JOIN PROD.COMMON.DIM_COUNTRY AS co\n    ON co.iso_alpha2_code = pc.country_code\nLEFT JOIN PROD.NPL_COMMON.DIM_DEAL AS dd\n    ON dd.deal_sk = pc.deal_sk\nORDER BY h.reporting_month, h.servicer, portfolio_name\n"
+   },
+   "columns": [
+    {
+     "id": "REPORTING_MONTH",
+     "formula": "[Custom SQL/REPORTING_MONTH]",
+     "name": "reporting_month"
+    },
+    {
+     "id": "MONTH_STATUS",
+     "formula": "[Custom SQL/MONTH_STATUS]",
+     "name": "month_status"
+    },
+    {
+     "id": "PORTFOLIO_SK",
+     "formula": "[Custom SQL/PORTFOLIO_SK]",
+     "name": "portfolio_sk"
+    },
+    {
+     "id": "SERVICER",
+     "formula": "[Custom SQL/SERVICER]",
+     "name": "servicer"
+    },
+    {
+     "id": "SERVICER_SOURCE",
+     "formula": "[Custom SQL/SERVICER_SOURCE]",
+     "name": "servicer_source"
+    },
+    {
+     "id": "PORTFOLIO_NAME",
+     "formula": "[Custom SQL/PORTFOLIO_NAME]",
+     "name": "portfolio_name"
+    },
+    {
+     "id": "DEAL",
+     "formula": "[Custom SQL/DEAL]",
+     "name": "deal"
+    },
+    {
+     "id": "COUNTRY_NAME",
+     "formula": "[Custom SQL/COUNTRY_NAME]",
+     "name": "country_name"
+    },
+    {
+     "id": "CURRENCY",
+     "formula": "[Custom SQL/CURRENCY]",
+     "name": "currency"
+    },
+    {
+     "id": "PURCHASE_PRICE",
+     "formula": "[Custom SQL/PURCHASE_PRICE]",
+     "name": "purchase_price"
+    },
+    {
+     "id": "PURCHASE_CURRENCY",
+     "formula": "[Custom SQL/PURCHASE_CURRENCY]",
+     "name": "purchase_currency"
+    },
+    {
+     "id": "ACQUISITION_MONTH",
+     "formula": "[Custom SQL/ACQUISITION_MONTH]",
+     "name": "acquisition_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_RECEIVED_FLAG",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_RECEIVED_FLAG]",
+     "name": "portfolio_feed_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_DUE_FLAG",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_DUE_FLAG]",
+     "name": "portfolio_feed_due_flag"
+    },
+    {
+     "id": "REFS_REPORTED",
+     "formula": "[Custom SQL/REFS_REPORTED]",
+     "name": "refs_reported"
+    },
+    {
+     "id": "REFS_MATCHED",
+     "formula": "[Custom SQL/REFS_MATCHED]",
+     "name": "refs_matched"
+    },
+    {
+     "id": "CASE_FEED_STATUS",
+     "formula": "[Custom SQL/CASE_FEED_STATUS]",
+     "name": "case_feed_status"
+    },
+    {
+     "id": "CASE_PAYMENTS_LOADED_FLAG",
+     "formula": "[Custom SQL/CASE_PAYMENTS_LOADED_FLAG]",
+     "name": "case_payments_loaded_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_COLLECTIONS",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_COLLECTIONS]",
+     "name": "portfolio_feed_collections"
+    },
+    {
+     "id": "CASE_FEED_COLLECTIONS",
+     "formula": "[Custom SQL/CASE_FEED_COLLECTIONS]",
+     "name": "case_feed_collections"
+    },
+    {
+     "id": "PORTFOLIO_FEED_BALANCE",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_BALANCE]",
+     "name": "portfolio_feed_balance"
+    },
+    {
+     "id": "CASE_FEED_BALANCE",
+     "formula": "[Custom SQL/CASE_FEED_BALANCE]",
+     "name": "case_feed_balance"
+    },
+    {
+     "id": "CLOSED_CASES_BALANCE",
+     "formula": "[Custom SQL/CLOSED_CASES_BALANCE]",
+     "name": "closed_cases_balance"
+    },
+    {
+     "id": "CASE_FEED_CASES",
+     "formula": "[Custom SQL/CASE_FEED_CASES]",
+     "name": "case_feed_cases"
+    },
+    {
+     "id": "CASE_FEED_OPEN_CASES",
+     "formula": "[Custom SQL/CASE_FEED_OPEN_CASES]",
+     "name": "case_feed_open_cases"
+    },
+    {
+     "id": "FORECAST_RECEIVED_FLAG",
+     "formula": "[Custom SQL/FORECAST_RECEIVED_FLAG]",
+     "name": "forecast_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_FIRST_MONTH",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_FIRST_MONTH]",
+     "name": "portfolio_feed_first_month"
+    },
+    {
+     "id": "CASE_FEED_FIRST_MONTH",
+     "formula": "[Custom SQL/CASE_FEED_FIRST_MONTH]",
+     "name": "case_feed_first_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_LAST_MONTH",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_LAST_MONTH]",
+     "name": "portfolio_feed_last_month"
+    },
+    {
+     "id": "CASE_FEED_LAST_MONTH",
+     "formula": "[Custom SQL/CASE_FEED_LAST_MONTH]",
+     "name": "case_feed_last_month"
+    },
+    {
+     "id": "MONTHS_REPORTED_TO_DATE",
+     "formula": "[Custom SQL/MONTHS_REPORTED_TO_DATE]",
+     "name": "months_reported_to_date"
+    },
+    {
+     "id": "MONTHS_OVERLAP_TO_DATE",
+     "formula": "[Custom SQL/MONTHS_OVERLAP_TO_DATE]",
+     "name": "months_overlap_to_date"
+    },
+    {
+     "id": "CASE_PAYMENT_MONTHS_SINCE_ACQUISITION",
+     "formula": "[Custom SQL/CASE_PAYMENT_MONTHS_SINCE_ACQUISITION]",
+     "name": "case_payment_months_since_acquisition"
+    },
+    {
+     "id": "REPORTED_MONTHS_SINCE_ACQUISITION",
+     "formula": "[Custom SQL/REPORTED_MONTHS_SINCE_ACQUISITION]",
+     "name": "reported_months_since_acquisition"
+    },
+    {
+     "id": "COLLECTIONS_RECONCILED_FLAG",
+     "formula": "[Custom SQL/COLLECTIONS_RECONCILED_FLAG]",
+     "name": "collections_reconciled_flag"
+    }
+   ]
+  },
+  {
+   "id": "ref_src",
+   "kind": "table",
+   "name": "Combined Refs",
+   "source": {
+    "kind": "sql",
+    "connectionId": "b3be9b8b-fb38-4b05-a8db-afdb5c47cdbf",
+    "statement": "-- Data Quality dashboard: one row per combined ref x reporting month.\n--\n-- The By Combined Ref (Intrum) / By Portfolio ID (other servicers) table reads\n-- this element. A combined ref is DIM_BATCH.BATCH_BK, the servicer's own\n-- reference, so a servicer can look a row up in its own system.\n--\n-- Rows: every ref-month that is in either feed. A ref missing from BOTH feeds\n-- in a month has no row; the portfolio view (portfolio_months_element.sql)\n-- shows that portfolio as Not Received. Gaps inside a ref's life are rare: 2\n-- portfolio-months since Jun 2014 had some refs reported and others not\n-- (2026-10-13).\n--\n-- Same sources, scope and rules as portfolio_months_element.sql: portfolios in\n-- DIM_PORTFOLIO, from Jun 2014. The first six CTEs (scope, the case book per\n-- ref and the servicer of each ref) are copied\n-- from it word for word; tests/run.py fails if they ever differ, and checks\n-- that a portfolio's refs add up to its row there.\n--\n-- Measured 2026-10-13: (filled in by tests/run.py --doc)\n\nWITH portfolios_in_scope AS (\n    SELECT portfolio_sk, portfolio_bk, capex_date, capex_amount, currency_id\n    FROM PROD.NPL_COMMON.DIM_PORTFOLIO\n),\n\ncase_book_by_ref AS (\n    -- The Case Feed's book at each month-end, per combined ref. The table holds\n    -- one row per case per month (1,495,141,394 rows, all unique, 2026-10-13),\n    -- so COUNT(*) is the number of cases listed. Counting distinct cases\n    -- instead took 9 minutes. case_feed_rows counts every listed case, open or\n    -- closed: whether the case feed came at all.\n    --\n    -- Data-quality guard: the snapshot keeps a closed case on the list every\n    -- month after it closed, with its last balance. On 31 Aug 2026 9.0m of\n    -- Intrum's 19.5m listed cases were already closed, carrying 20.2bn, while\n    -- Intrum's own report counts 8.8m open cases. So the cases and balance\n    -- compared with the report leave closed cases out (case_book and\n    -- ref_months subtract closed_cases), and their balance is shown on its own\n    -- (closed_cases_balance). The Servicing dashboard's cases on book still\n    -- count them.\n    --\n    -- DIM_CASE has one row per version of a case (154,663,197 versions of\n    -- 22,486,377 cases, 2026-10-14) and the snapshot points at the version\n    -- valid at each month-end, so a case is closed at a month-end when that\n    -- version's closing date is on or before it. One read of the snapshot:\n    -- 474s against 823s for two (X-Small, 2026-10-14, same totals).\n    SELECT\n        s.batch_sk,\n        s.date_day                     AS reporting_month,\n        MAX(s.portfolio_sk)            AS portfolio_sk,\n        MAX(s.reporting_system_sk)     AS reporting_system_sk,\n        COUNT(*)                       AS case_feed_rows,\n        SUM(s.outstanding_total)       AS listed_balance,\n        COUNT(dc.case_sk)              AS closed_cases,\n        SUM(IFF(dc.case_sk IS NULL, 0, s.outstanding_total)) AS closed_cases_balance\n    FROM PROD.NPL_COMMON.FCT_CASE_SNAPSHOT_DAILY AS s\n    LEFT JOIN PROD.NPL_COMMON.DIM_CASE AS dc\n        ON dc.case_sk = s.case_sk AND dc.closing_date <= s.date_day\n    WHERE s.date_day BETWEEN '2014-06-30' AND CURRENT_DATE()\n      AND s.portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n    GROUP BY 1, 2\n),\n\nref_case_servicer AS (\n    -- The servicer the case feed names for each ref ('Unknown' is no answer).\n    SELECT c.batch_sk, MAX(c.portfolio_sk) AS portfolio_sk, MAX(INITCAP(rs.servicer_name)) AS servicer,\n           SUM(c.case_feed_rows) AS case_months\n    FROM case_book_by_ref AS c\n    INNER JOIN PROD.NPL_COMMON.DIM_REPORTING_SYSTEM AS rs\n        ON rs.reporting_system_sk = c.reporting_system_sk\n    WHERE rs.servicer_name <> 'Unknown'\n    GROUP BY 1\n),\n\nportfolio_case_servicer AS (\n    -- For refs the case feed does not name: the portfolio's main servicer.\n    SELECT portfolio_sk, MAX_BY(servicer, case_months) AS servicer\n    FROM ref_case_servicer\n    GROUP BY 1\n),\n\nportfolio_rule AS (\n    -- The manager's business rule (2026-10-12), copied from the Servicing\n    -- dashboard's portfolios_element.sql, for portfolios with no case feed.\n    SELECT\n        f.portfolio_sk,\n        CASE\n            WHEN ds.deal_source_name = 'ORGANIC ORIGINATED' AND f.country_code = 'UK' THEN 'Massey'\n            WHEN ds.deal_source_name = 'ORGANIC ORIGINATED' AND f.country_code = 'IT' THEN 'Fire'\n            WHEN ds.deal_source_name IN ('ORGANIC ORIGINATED', 'LEGACY', 'GESCOBRO')\n                 AND f.country_code = 'ES'                                          THEN 'Gescobro'\n            WHEN ds.deal_source_name = 'LEGACY' AND f.country_code = 'IT'           THEN 'Cerved'\n            ELSE 'Intrum'\n        END                                                 AS servicer\n    FROM (SELECT portfolio_sk,\n                 MAX_BY(deal_source_sk, period_end_date)    AS deal_source_sk,\n                 MAX(country_id)                            AS country_code\n          FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n          WHERE portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n          GROUP BY 1) AS f\n    LEFT JOIN PROD.NPL_COMMON.DIM_DEAL_SOURCE AS ds\n        ON ds.deal_source_sk = f.deal_source_sk\n),\n\nref_servicer AS (\n    -- One servicer per ref, from either feed, and where it came from.\n    SELECT\n        refs.batch_sk,\n        refs.portfolio_sk,\n        COALESCE(rcs.servicer, pcs.servicer, pr.servicer)   AS servicer,\n        IFF(rcs.servicer IS NOT NULL OR pcs.servicer IS NOT NULL,\n            'Case Feed', 'Business Rule')                   AS servicer_source\n    FROM (SELECT batch_sk, MAX(portfolio_sk) AS portfolio_sk\n          FROM (SELECT batch_sk, portfolio_sk FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n                WHERE portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n                UNION\n                SELECT batch_sk, portfolio_sk FROM case_book_by_ref)\n          GROUP BY 1) AS refs\n    LEFT JOIN ref_case_servicer AS rcs\n        ON rcs.batch_sk = refs.batch_sk\n    LEFT JOIN portfolio_case_servicer AS pcs\n        ON pcs.portfolio_sk = refs.portfolio_sk\n    LEFT JOIN portfolio_rule AS pr\n        ON pr.portfolio_sk = refs.portfolio_sk\n),\n\nref_portfolio_feed AS (\n    -- The Portfolio Feed, per combined ref and month.\n    SELECT\n        batch_sk,\n        period_end_date                AS reporting_month,\n        MAX(portfolio_sk)              AS portfolio_sk,\n        SUM(gross_cash_recoveries)     AS portfolio_feed_collections,\n        SUM(total_balance)             AS portfolio_feed_balance\n    FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY\n    WHERE period_end_date BETWEEN '2014-06-30' AND CURRENT_DATE()\n      AND portfolio_sk IN (SELECT portfolio_sk FROM portfolios_in_scope)\n    GROUP BY 1, 2\n),\n\nref_case_payments AS (\n    -- Payments by the month they were paid, bounded at today (dates run to 4570).\n    SELECT\n        batch_sk,\n        LAST_DAY(collection_date)      AS reporting_month,\n        SUM(amount)                    AS case_feed_collections\n    FROM PROD.NPL_COMMON.FCT_CASE_COLLECTION\n    WHERE collection_date BETWEEN '2014-06-01' AND CURRENT_DATE()\n    GROUP BY 1, 2\n),\n\nmonth_status AS (\n    -- Complete or Loading, the same rule as portfolio_months_element.sql.\n    SELECT\n        reporting_month,\n        IFF(LAG(COUNT(DISTINCT portfolio_sk)) OVER (ORDER BY reporting_month) IS NULL\n            OR COUNT(DISTINCT portfolio_sk) >= 0.5 * LAG(COUNT(DISTINCT portfolio_sk)) OVER (ORDER BY reporting_month),\n            'Complete', 'Loading')                          AS month_status\n    FROM ref_portfolio_feed\n    GROUP BY 1\n),\n\nref_months AS (\n    -- Every ref-month in either feed.\n    SELECT\n        COALESCE(pf.batch_sk, cb.batch_sk)               AS batch_sk,\n        COALESCE(pf.reporting_month, cb.reporting_month) AS reporting_month,\n        COALESCE(pf.portfolio_sk, cb.portfolio_sk)       AS portfolio_sk,\n        rs.servicer,\n        pf.batch_sk IS NOT NULL                          AS portfolio_feed_received_flag,\n        cb.batch_sk IS NOT NULL                          AS in_case_feed_flag,\n        pf.portfolio_feed_collections,\n        pf.portfolio_feed_balance,\n        -- Every case listed, open or closed: the Servicing dashboard's cases on book.\n        cb.case_feed_rows                                   AS case_feed_cases,\n        -- Open cases only, and their balance, the figures compared with the report (case_book_by_ref says why).\n        cb.case_feed_rows - cb.closed_cases                 AS case_feed_open_cases,\n        cb.listed_balance - cb.closed_cases_balance         AS case_feed_balance,\n        IFF(cb.batch_sk IS NULL, NULL, cb.closed_cases_balance) AS closed_cases_balance\n    FROM ref_portfolio_feed AS pf\n    FULL OUTER JOIN case_book_by_ref AS cb\n        ON cb.batch_sk = pf.batch_sk AND cb.reporting_month = pf.reporting_month\n    INNER JOIN ref_servicer AS rs\n        ON rs.batch_sk = COALESCE(pf.batch_sk, cb.batch_sk)\n),\n\nportfolio_case_months AS (\n    -- Months the same servicer's case feed has ANY ref of the portfolio: a ref\n    -- missing from it then reads Under Another Ref (Massey), not Not Received.\n    SELECT DISTINCT c.portfolio_sk, rs.servicer, c.reporting_month\n    FROM case_book_by_ref AS c\n    INNER JOIN ref_servicer AS rs\n        ON rs.batch_sk = c.batch_sk\n),\n\nchecks AS (\n    SELECT\n        r.*,\n        CASE\n            WHEN r.in_case_feed_flag                                  THEN 'Received'\n            WHEN pcm.portfolio_sk IS NOT NULL                         THEN 'Under Another Ref'\n            -- Stopped: this ref was in the case feed in an earlier month.\n            WHEN MAX(IFF(r.in_case_feed_flag, r.reporting_month, NULL)) OVER (\n                     PARTITION BY r.batch_sk ORDER BY r.reporting_month\n                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) IS NOT NULL\n                                                                      THEN 'Stopped'\n            ELSE 'Not Received'\n        END                                                           AS case_feed_status,\n        MIN(IFF(r.portfolio_feed_received_flag, r.reporting_month, NULL)) OVER (PARTITION BY r.batch_sk) AS portfolio_feed_first_month,\n        MIN(IFF(r.in_case_feed_flag, r.reporting_month, NULL)) OVER (PARTITION BY r.batch_sk)            AS case_feed_first_month,\n        MAX(IFF(r.portfolio_feed_received_flag, r.reporting_month, NULL)) OVER (PARTITION BY r.batch_sk ORDER BY r.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)                                            AS portfolio_feed_last_month,\n        MAX(IFF(r.in_case_feed_flag, r.reporting_month, NULL)) OVER (PARTITION BY r.batch_sk ORDER BY r.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)                                            AS case_feed_last_month,\n        -- Months Overlap, up to this row (as the portfolio element).\n        SUM(IFF(r.portfolio_feed_received_flag, 1, 0)) OVER (\n            PARTITION BY r.batch_sk ORDER BY r.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)                                            AS months_reported_to_date,\n        SUM(IFF(r.portfolio_feed_received_flag AND r.in_case_feed_flag, 1, 0)) OVER (\n            PARTITION BY r.batch_sk ORDER BY r.reporting_month\n            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)                                            AS months_overlap_to_date\n    FROM ref_months AS r\n    LEFT JOIN portfolio_case_months AS pcm\n        ON pcm.portfolio_sk = r.portfolio_sk AND pcm.servicer = r.servicer AND pcm.reporting_month = r.reporting_month\n)\n\nSELECT\n    c.reporting_month,\n    COALESCE(ms.month_status, 'Loading')                    AS month_status,\n    c.servicer,\n    d.portfolio_bk                                          AS portfolio_name,\n    -- The deal as the Servicing dashboard names it (its portfolios_element.sql).\n    COALESCE(dd.deal_alias, dd.deal_bk, 'Unknown')          AS deal,\n    COALESCE(co.country_name, pc.country_code)              AS country_name,\n    pc.currency,\n    d.capex_amount                                          AS purchase_price,\n    COALESCE(b.batch_bk, 'No Combined Ref')                 AS combined_ref,\n    c.portfolio_feed_received_flag,\n    -- Not Yet Received: a report is due by the 15th of the month after (every\n    -- Intrum report since Feb 2026 reached the warehouse between the 10th and\n    -- the 14th, 2026-10-14). Before then a missing report is not yet late.\n    CURRENT_DATE() >= DATEADD(DAY, 15, c.reporting_month)   AS portfolio_feed_due_flag,\n    c.case_feed_status,\n    -- Not the servicer's fault: brocc-data does not load Cerved's or Gescobro's\n    -- case payments into PROD yet (int_npl_case_collection_conformed unions\n    -- only Intrum and Massey; RAW holds both servicers' payments, 2026-10-13).\n    -- Nor all of Intrum's Italian ones: CAT 4034 has no orig_tr_id, so\n    -- int_npl_case_collection_intrum keeps one payment per case (raw 2,850\n    -- Dec 2025 - Aug 2026, PROD 1,041). The Servicing dashboard never\n    -- reconciles Italy for this (the user, 2026-10-14); same here. Their\n    -- collections cannot be compared, so the dashboard says so instead of\n    -- flagging them. Turn each off when brocc-data fixes it.\n    c.servicer NOT IN ('Cerved', 'Gescobro')\n        AND COALESCE(pc.country_code, '') <> 'IT'          AS case_payments_loaded_flag,\n    c.portfolio_feed_collections,\n    cp.case_feed_collections,\n    c.portfolio_feed_balance,\n    c.case_feed_balance,\n    c.closed_cases_balance,\n    c.case_feed_cases,\n    c.case_feed_open_cases,\n    -- The forecast is checked per portfolio: Cerved's sits on one portfolio-level ref.\n    sf.portfolio_sk IS NOT NULL                             AS forecast_received_flag,\n    c.portfolio_feed_first_month,\n    c.case_feed_first_month,\n    c.portfolio_feed_last_month,\n    c.case_feed_last_month,\n    c.months_reported_to_date,\n    c.months_overlap_to_date\nFROM checks AS c\nLEFT JOIN month_status AS ms\n    ON ms.reporting_month = c.reporting_month\nLEFT JOIN ref_case_payments AS cp\n    ON cp.batch_sk = c.batch_sk AND cp.reporting_month = c.reporting_month\nLEFT JOIN (SELECT DISTINCT portfolio_sk, period_end_date\n           FROM PROD.NPL_COMMON.FCT_PORTFOLIO_FORECAST_SERVICER_SNAPSHOT_MONTHLY) AS sf\n    ON sf.portfolio_sk = c.portfolio_sk AND sf.period_end_date = c.reporting_month\nLEFT JOIN (SELECT portfolio_sk, MAX(country_id) AS country_code, MAX(currency_id) AS currency,\n                  MAX(deal_sk) AS deal_sk\n           FROM PROD.NPL_COMMON.FCT_PORTFOLIO_SNAPSHOT_MONTHLY GROUP BY 1) AS pc\n    ON pc.portfolio_sk = c.portfolio_sk\nINNER JOIN portfolios_in_scope AS d\n    ON d.portfolio_sk = c.portfolio_sk\nLEFT JOIN PROD.COMMON.DIM_COUNTRY AS co\n    ON co.iso_alpha2_code = pc.country_code\nLEFT JOIN PROD.NPL_COMMON.DIM_DEAL AS dd\n    ON dd.deal_sk = pc.deal_sk\nLEFT JOIN PROD.NPL_COMMON.DIM_BATCH AS b\n    ON b.batch_sk = c.batch_sk\nORDER BY c.reporting_month, c.servicer, portfolio_name, combined_ref\n"
+   },
+   "columns": [
+    {
+     "id": "REPORTING_MONTH",
+     "formula": "[Custom SQL/REPORTING_MONTH]",
+     "name": "reporting_month"
+    },
+    {
+     "id": "MONTH_STATUS",
+     "formula": "[Custom SQL/MONTH_STATUS]",
+     "name": "month_status"
+    },
+    {
+     "id": "SERVICER",
+     "formula": "[Custom SQL/SERVICER]",
+     "name": "servicer"
+    },
+    {
+     "id": "PORTFOLIO_NAME",
+     "formula": "[Custom SQL/PORTFOLIO_NAME]",
+     "name": "portfolio_name"
+    },
+    {
+     "id": "DEAL",
+     "formula": "[Custom SQL/DEAL]",
+     "name": "deal"
+    },
+    {
+     "id": "COUNTRY_NAME",
+     "formula": "[Custom SQL/COUNTRY_NAME]",
+     "name": "country_name"
+    },
+    {
+     "id": "CURRENCY",
+     "formula": "[Custom SQL/CURRENCY]",
+     "name": "currency"
+    },
+    {
+     "id": "PURCHASE_PRICE",
+     "formula": "[Custom SQL/PURCHASE_PRICE]",
+     "name": "purchase_price"
+    },
+    {
+     "id": "COMBINED_REF",
+     "formula": "[Custom SQL/COMBINED_REF]",
+     "name": "combined_ref"
+    },
+    {
+     "id": "PORTFOLIO_FEED_RECEIVED_FLAG",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_RECEIVED_FLAG]",
+     "name": "portfolio_feed_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_DUE_FLAG",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_DUE_FLAG]",
+     "name": "portfolio_feed_due_flag"
+    },
+    {
+     "id": "CASE_FEED_STATUS",
+     "formula": "[Custom SQL/CASE_FEED_STATUS]",
+     "name": "case_feed_status"
+    },
+    {
+     "id": "CASE_PAYMENTS_LOADED_FLAG",
+     "formula": "[Custom SQL/CASE_PAYMENTS_LOADED_FLAG]",
+     "name": "case_payments_loaded_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_COLLECTIONS",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_COLLECTIONS]",
+     "name": "portfolio_feed_collections"
+    },
+    {
+     "id": "CASE_FEED_COLLECTIONS",
+     "formula": "[Custom SQL/CASE_FEED_COLLECTIONS]",
+     "name": "case_feed_collections"
+    },
+    {
+     "id": "PORTFOLIO_FEED_BALANCE",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_BALANCE]",
+     "name": "portfolio_feed_balance"
+    },
+    {
+     "id": "CASE_FEED_BALANCE",
+     "formula": "[Custom SQL/CASE_FEED_BALANCE]",
+     "name": "case_feed_balance"
+    },
+    {
+     "id": "CLOSED_CASES_BALANCE",
+     "formula": "[Custom SQL/CLOSED_CASES_BALANCE]",
+     "name": "closed_cases_balance"
+    },
+    {
+     "id": "CASE_FEED_CASES",
+     "formula": "[Custom SQL/CASE_FEED_CASES]",
+     "name": "case_feed_cases"
+    },
+    {
+     "id": "CASE_FEED_OPEN_CASES",
+     "formula": "[Custom SQL/CASE_FEED_OPEN_CASES]",
+     "name": "case_feed_open_cases"
+    },
+    {
+     "id": "FORECAST_RECEIVED_FLAG",
+     "formula": "[Custom SQL/FORECAST_RECEIVED_FLAG]",
+     "name": "forecast_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_FIRST_MONTH",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_FIRST_MONTH]",
+     "name": "portfolio_feed_first_month"
+    },
+    {
+     "id": "CASE_FEED_FIRST_MONTH",
+     "formula": "[Custom SQL/CASE_FEED_FIRST_MONTH]",
+     "name": "case_feed_first_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_LAST_MONTH",
+     "formula": "[Custom SQL/PORTFOLIO_FEED_LAST_MONTH]",
+     "name": "portfolio_feed_last_month"
+    },
+    {
+     "id": "CASE_FEED_LAST_MONTH",
+     "formula": "[Custom SQL/CASE_FEED_LAST_MONTH]",
+     "name": "case_feed_last_month"
+    },
+    {
+     "id": "MONTHS_REPORTED_TO_DATE",
+     "formula": "[Custom SQL/MONTHS_REPORTED_TO_DATE]",
+     "name": "months_reported_to_date"
+    },
+    {
+     "id": "MONTHS_OVERLAP_TO_DATE",
+     "formula": "[Custom SQL/MONTHS_OVERLAP_TO_DATE]",
+     "name": "months_overlap_to_date"
+    }
+   ]
+  },
+  {
+   "id": "pm_rows",
+   "kind": "table",
+   "name": "Portfolio Rows",
+   "source": {
+    "kind": "table",
+    "elementId": "src"
+   },
+   "columns": [
+    {
+     "id": "REPORTING_MONTH",
+     "formula": "[Portfolio Months/reporting_month]",
+     "name": "reporting_month"
+    },
+    {
+     "id": "MONTH_STATUS",
+     "formula": "[Portfolio Months/month_status]",
+     "name": "month_status"
+    },
+    {
+     "id": "PORTFOLIO_SK",
+     "formula": "[Portfolio Months/portfolio_sk]",
+     "name": "portfolio_sk"
+    },
+    {
+     "id": "SERVICER",
+     "formula": "[Portfolio Months/servicer]",
+     "name": "servicer"
+    },
+    {
+     "id": "SERVICER_SOURCE",
+     "formula": "[Portfolio Months/servicer_source]",
+     "name": "servicer_source"
+    },
+    {
+     "id": "PORTFOLIO_NAME",
+     "formula": "[Portfolio Months/portfolio_name]",
+     "name": "portfolio_name"
+    },
+    {
+     "id": "DEAL",
+     "formula": "[Portfolio Months/deal]",
+     "name": "deal"
+    },
+    {
+     "id": "COUNTRY_NAME",
+     "formula": "[Portfolio Months/country_name]",
+     "name": "country_name"
+    },
+    {
+     "id": "CURRENCY",
+     "formula": "[Portfolio Months/currency]",
+     "name": "currency"
+    },
+    {
+     "id": "PURCHASE_PRICE",
+     "formula": "[Portfolio Months/purchase_price]",
+     "name": "purchase_price"
+    },
+    {
+     "id": "PURCHASE_CURRENCY",
+     "formula": "[Portfolio Months/purchase_currency]",
+     "name": "purchase_currency"
+    },
+    {
+     "id": "ACQUISITION_MONTH",
+     "formula": "[Portfolio Months/acquisition_month]",
+     "name": "acquisition_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_RECEIVED_FLAG",
+     "formula": "[Portfolio Months/portfolio_feed_received_flag]",
+     "name": "portfolio_feed_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_DUE_FLAG",
+     "formula": "[Portfolio Months/portfolio_feed_due_flag]",
+     "name": "portfolio_feed_due_flag"
+    },
+    {
+     "id": "REFS_REPORTED",
+     "formula": "[Portfolio Months/refs_reported]",
+     "name": "refs_reported"
+    },
+    {
+     "id": "REFS_MATCHED",
+     "formula": "[Portfolio Months/refs_matched]",
+     "name": "refs_matched"
+    },
+    {
+     "id": "CASE_FEED_STATUS",
+     "formula": "[Portfolio Months/case_feed_status]",
+     "name": "case_feed_status"
+    },
+    {
+     "id": "CASE_PAYMENTS_LOADED_FLAG",
+     "formula": "[Portfolio Months/case_payments_loaded_flag]",
+     "name": "case_payments_loaded_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_COLLECTIONS",
+     "formula": "[Portfolio Months/portfolio_feed_collections]",
+     "name": "portfolio_feed_collections"
+    },
+    {
+     "id": "CASE_FEED_COLLECTIONS",
+     "formula": "[Portfolio Months/case_feed_collections]",
+     "name": "case_feed_collections"
+    },
+    {
+     "id": "PORTFOLIO_FEED_BALANCE",
+     "formula": "[Portfolio Months/portfolio_feed_balance]",
+     "name": "portfolio_feed_balance"
+    },
+    {
+     "id": "CASE_FEED_BALANCE",
+     "formula": "[Portfolio Months/case_feed_balance]",
+     "name": "case_feed_balance"
+    },
+    {
+     "id": "CLOSED_CASES_BALANCE",
+     "formula": "[Portfolio Months/closed_cases_balance]",
+     "name": "closed_cases_balance"
+    },
+    {
+     "id": "CASE_FEED_CASES",
+     "formula": "[Portfolio Months/case_feed_cases]",
+     "name": "case_feed_cases"
+    },
+    {
+     "id": "CASE_FEED_OPEN_CASES",
+     "formula": "[Portfolio Months/case_feed_open_cases]",
+     "name": "case_feed_open_cases"
+    },
+    {
+     "id": "FORECAST_RECEIVED_FLAG",
+     "formula": "[Portfolio Months/forecast_received_flag]",
+     "name": "forecast_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_FIRST_MONTH",
+     "formula": "[Portfolio Months/portfolio_feed_first_month]",
+     "name": "portfolio_feed_first_month"
+    },
+    {
+     "id": "CASE_FEED_FIRST_MONTH",
+     "formula": "[Portfolio Months/case_feed_first_month]",
+     "name": "case_feed_first_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_LAST_MONTH",
+     "formula": "[Portfolio Months/portfolio_feed_last_month]",
+     "name": "portfolio_feed_last_month"
+    },
+    {
+     "id": "CASE_FEED_LAST_MONTH",
+     "formula": "[Portfolio Months/case_feed_last_month]",
+     "name": "case_feed_last_month"
+    },
+    {
+     "id": "MONTHS_REPORTED_TO_DATE",
+     "formula": "[Portfolio Months/months_reported_to_date]",
+     "name": "months_reported_to_date"
+    },
+    {
+     "id": "MONTHS_OVERLAP_TO_DATE",
+     "formula": "[Portfolio Months/months_overlap_to_date]",
+     "name": "months_overlap_to_date"
+    },
+    {
+     "id": "CASE_PAYMENT_MONTHS_SINCE_ACQUISITION",
+     "formula": "[Portfolio Months/case_payment_months_since_acquisition]",
+     "name": "case_payment_months_since_acquisition"
+    },
+    {
+     "id": "REPORTED_MONTHS_SINCE_ACQUISITION",
+     "formula": "[Portfolio Months/reported_months_since_acquisition]",
+     "name": "reported_months_since_acquisition"
+    },
+    {
+     "id": "COLLECTIONS_RECONCILED_FLAG",
+     "formula": "[Portfolio Months/collections_reconciled_flag]",
+     "name": "collections_reconciled_flag"
+    }
+   ]
+  },
+  {
+   "id": "ref_rows",
+   "kind": "table",
+   "name": "Combined Ref Rows",
+   "source": {
+    "kind": "table",
+    "elementId": "ref_src"
+   },
+   "columns": [
+    {
+     "id": "REPORTING_MONTH",
+     "formula": "[Combined Refs/reporting_month]",
+     "name": "reporting_month"
+    },
+    {
+     "id": "MONTH_STATUS",
+     "formula": "[Combined Refs/month_status]",
+     "name": "month_status"
+    },
+    {
+     "id": "SERVICER",
+     "formula": "[Combined Refs/servicer]",
+     "name": "servicer"
+    },
+    {
+     "id": "PORTFOLIO_NAME",
+     "formula": "[Combined Refs/portfolio_name]",
+     "name": "portfolio_name"
+    },
+    {
+     "id": "DEAL",
+     "formula": "[Combined Refs/deal]",
+     "name": "deal"
+    },
+    {
+     "id": "COUNTRY_NAME",
+     "formula": "[Combined Refs/country_name]",
+     "name": "country_name"
+    },
+    {
+     "id": "CURRENCY",
+     "formula": "[Combined Refs/currency]",
+     "name": "currency"
+    },
+    {
+     "id": "PURCHASE_PRICE",
+     "formula": "[Combined Refs/purchase_price]",
+     "name": "purchase_price"
+    },
+    {
+     "id": "COMBINED_REF",
+     "formula": "[Combined Refs/combined_ref]",
+     "name": "combined_ref"
+    },
+    {
+     "id": "PORTFOLIO_FEED_RECEIVED_FLAG",
+     "formula": "[Combined Refs/portfolio_feed_received_flag]",
+     "name": "portfolio_feed_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_DUE_FLAG",
+     "formula": "[Combined Refs/portfolio_feed_due_flag]",
+     "name": "portfolio_feed_due_flag"
+    },
+    {
+     "id": "CASE_FEED_STATUS",
+     "formula": "[Combined Refs/case_feed_status]",
+     "name": "case_feed_status"
+    },
+    {
+     "id": "CASE_PAYMENTS_LOADED_FLAG",
+     "formula": "[Combined Refs/case_payments_loaded_flag]",
+     "name": "case_payments_loaded_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_COLLECTIONS",
+     "formula": "[Combined Refs/portfolio_feed_collections]",
+     "name": "portfolio_feed_collections"
+    },
+    {
+     "id": "CASE_FEED_COLLECTIONS",
+     "formula": "[Combined Refs/case_feed_collections]",
+     "name": "case_feed_collections"
+    },
+    {
+     "id": "PORTFOLIO_FEED_BALANCE",
+     "formula": "[Combined Refs/portfolio_feed_balance]",
+     "name": "portfolio_feed_balance"
+    },
+    {
+     "id": "CASE_FEED_BALANCE",
+     "formula": "[Combined Refs/case_feed_balance]",
+     "name": "case_feed_balance"
+    },
+    {
+     "id": "CLOSED_CASES_BALANCE",
+     "formula": "[Combined Refs/closed_cases_balance]",
+     "name": "closed_cases_balance"
+    },
+    {
+     "id": "CASE_FEED_CASES",
+     "formula": "[Combined Refs/case_feed_cases]",
+     "name": "case_feed_cases"
+    },
+    {
+     "id": "CASE_FEED_OPEN_CASES",
+     "formula": "[Combined Refs/case_feed_open_cases]",
+     "name": "case_feed_open_cases"
+    },
+    {
+     "id": "FORECAST_RECEIVED_FLAG",
+     "formula": "[Combined Refs/forecast_received_flag]",
+     "name": "forecast_received_flag"
+    },
+    {
+     "id": "PORTFOLIO_FEED_FIRST_MONTH",
+     "formula": "[Combined Refs/portfolio_feed_first_month]",
+     "name": "portfolio_feed_first_month"
+    },
+    {
+     "id": "CASE_FEED_FIRST_MONTH",
+     "formula": "[Combined Refs/case_feed_first_month]",
+     "name": "case_feed_first_month"
+    },
+    {
+     "id": "PORTFOLIO_FEED_LAST_MONTH",
+     "formula": "[Combined Refs/portfolio_feed_last_month]",
+     "name": "portfolio_feed_last_month"
+    },
+    {
+     "id": "CASE_FEED_LAST_MONTH",
+     "formula": "[Combined Refs/case_feed_last_month]",
+     "name": "case_feed_last_month"
+    },
+    {
+     "id": "MONTHS_REPORTED_TO_DATE",
+     "formula": "[Combined Refs/months_reported_to_date]",
+     "name": "months_reported_to_date"
+    },
+    {
+     "id": "MONTHS_OVERLAP_TO_DATE",
+     "formula": "[Combined Refs/months_overlap_to_date]",
+     "name": "months_overlap_to_date"
+    }
+   ]
+  },
+  {
+   "id": "h_title",
+   "kind": "text",
+   "body": "## **Servicer Data Quality**"
+  },
+  {
+   "id": "h_sub",
+   "kind": "text",
+   "body": "<span style=\"color: #5C6B66\">Snowflake PROD \u00b7 NPL\\_COMMON \u00b7 From Jun 2014 </span>"
+  },
+  {
+   "id": "f_servicer",
+   "kind": "control",
+   "controlType": "segmented",
+   "controlId": "Servicer",
+   "name": "Servicer",
+   "filters": [
+    {
+     "columnId": "SERVICER",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "SERVICER",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ],
+   "source": {
+    "kind": "manual",
+    "valueType": "text",
+    "values": [
+     "Intrum",
+     "Gescobro",
+     "Cerved",
+     "Souq",
+     "Massey",
+     "Fire"
+    ]
+   },
+   "value": "Intrum",
+   "showClearLabel": false
+  },
+  {
+   "id": "f_months",
+   "kind": "control",
+   "controlType": "segmented",
+   "controlId": "Quick-Filter-Months",
+   "name": "Quick Filter Months",
+   "source": {
+    "kind": "manual",
+    "valueType": "text",
+    "values": [
+     "Latest Month",
+     "Last 3 Months",
+     "Last 6 Months",
+     "Last 12 Months",
+     "All Time"
+    ],
+    "labels": [
+     null,
+     "L3M",
+     "L6M",
+     "L12M",
+     null
+    ]
+   },
+   "value": "Latest Month",
+   "showClearLabel": false
+  },
+  {
+   "id": "f_range",
+   "kind": "control",
+   "controlType": "date-range",
+   "controlId": "Month-Filter",
+   "name": "Month Filter",
+   "mode": "between",
+   "filters": [
+    {
+     "columnId": "REPORTING_MONTH",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "REPORTING_MONTH",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ],
+   "includeNulls": "when-no-value-is-selected"
+  },
+  {
+   "id": "f_country",
+   "kind": "control",
+   "controlType": "list",
+   "controlId": "Country",
+   "name": "Country",
+   "mode": "include",
+   "selectionMode": "multiple",
+   "filters": [
+    {
+     "columnId": "COUNTRY_NAME",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "COUNTRY_NAME",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ],
+   "source": {
+    "kind": "source",
+    "columnId": "COUNTRY_NAME",
+    "source": {
+     "kind": "table",
+     "elementId": "pm_rows"
+    }
+   },
+   "values": []
+  },
+  {
+   "id": "f_deal",
+   "kind": "control",
+   "controlType": "list",
+   "controlId": "Deal",
+   "name": "Deal",
+   "mode": "include",
+   "selectionMode": "multiple",
+   "filters": [
+    {
+     "columnId": "DEAL",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "DEAL",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ],
+   "source": {
+    "kind": "source",
+    "columnId": "DEAL",
+    "source": {
+     "kind": "table",
+     "elementId": "pm_rows"
+    }
+   },
+   "values": []
+  },
+  {
+   "id": "f_portfolio",
+   "kind": "control",
+   "controlType": "list",
+   "controlId": "Portfolio",
+   "name": "Portfolio",
+   "mode": "include",
+   "selectionMode": "multiple",
+   "filters": [
+    {
+     "columnId": "PORTFOLIO_NAME",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "PORTFOLIO_NAME",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ],
+   "source": {
+    "kind": "source",
+    "columnId": "PORTFOLIO_NAME",
+    "source": {
+     "kind": "table",
+     "elementId": "pm_rows"
+    }
+   },
+   "values": []
+  },
+  {
+   "id": "f_price",
+   "kind": "control",
+   "controlType": "number-range",
+   "controlId": "Purchase-Price",
+   "name": "Purchase Price",
+   "filters": [
+    {
+     "columnId": "PURCHASE_PRICE",
+     "source": {
+      "kind": "table",
+      "elementId": "pm_rows"
+     }
+    },
+    {
+     "columnId": "PURCHASE_PRICE",
+     "source": {
+      "kind": "table",
+      "elementId": "ref_rows"
+     }
+    }
+   ]
+  },
+  {
+   "id": "h_clear",
+   "kind": "button",
+   "text": "Clear Filters",
+   "appearance": "outline",
+   "size": "small",
+   "align": "center",
+   "fontColor": "#1D5B4D",
+   "actions": [
+    {
+     "id": "clear_filters",
+     "trigger": "on-click",
+     "effects": [
+      {
+       "effect": "clear-control",
+       "scope": {
+        "type": "control",
+        "controlId": "Month-Filter"
+       }
+      },
+      {
+       "effect": "clear-control",
+       "scope": {
+        "type": "control",
+        "controlId": "Country"
+       }
+      },
+      {
+       "effect": "clear-control",
+       "scope": {
+        "type": "control",
+        "controlId": "Deal"
+       }
+      },
+      {
+       "effect": "clear-control",
+       "scope": {
+        "type": "control",
+        "controlId": "Portfolio"
+       }
+      },
+      {
+       "effect": "clear-control",
+       "scope": {
+        "type": "control",
+        "controlId": "Purchase-Price"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "pm_by_port",
+   "kind": "table",
+   "name": "pm by portfolio",
+   "source": {
+    "kind": "table",
+    "elementId": "pm_rows"
+   },
+   "columns": [
+    {
+     "id": "k_port",
+     "formula": "[Portfolio Rows/portfolio_name]",
+     "name": "Portfolio Name"
+    },
+    {
+     "id": "k_deal",
+     "formula": "[Portfolio Rows/deal]",
+     "name": "Deal"
+    },
+    {
+     "id": "k_srv",
+     "formula": "[Portfolio Rows/servicer]",
+     "name": "Servicer"
+    },
+    {
+     "id": "k_cty",
+     "formula": "[Portfolio Rows/country_name]",
+     "name": "Country"
+    },
+    {
+     "id": "k_cur",
+     "formula": "[Portfolio Rows/currency]",
+     "name": "Currency"
+    },
+    {
+     "id": "st",
+     "formula": "If((If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Portfolio Rows/portfolio_feed_received_flag] and [Portfolio Rows/portfolio_feed_due_flag], 1, 0)) > 0, 1, 0) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_status])) = \"Received\", 0, 1) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_overlap_to_date])) < Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date])), 1, 0) + If(In(If(Not (Max(If([Portfolio Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(Min(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and [Portfolio Rows/portfolio_feed_received_flag], If([Portfolio Rows/collections_reconciled_flag], 1, 0))) = 1, \"Reconciled\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections]))), \"No Payments\", If(Max([Portfolio Rows/case_payment_months_since_acquisition]) >= 0.8 * Max([Portfolio Rows/reported_months_since_acquisition]), \"Not Reconciled\", \"Payments in Under 80% of Months\"))))), \"No Payments\", \"Not Reconciled\", \"Payments in Under 80% of Months\"), 1, 0) + If(If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\"))) = \"Not Reconciled\", 1, 0) + If(If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0) and [Portfolio Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\") = \"Received\", 0, 1)) > 0, \"Needs Action\", \"Healthy\")",
+     "name": "Status"
+    },
+    {
+     "id": "issues",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Portfolio Rows/portfolio_feed_received_flag] and [Portfolio Rows/portfolio_feed_due_flag], 1, 0)) > 0, 1, 0) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_status])) = \"Received\", 0, 1) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_overlap_to_date])) < Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date])), 1, 0) + If(In(If(Not (Max(If([Portfolio Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(Min(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and [Portfolio Rows/portfolio_feed_received_flag], If([Portfolio Rows/collections_reconciled_flag], 1, 0))) = 1, \"Reconciled\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections]))), \"No Payments\", If(Max([Portfolio Rows/case_payment_months_since_acquisition]) >= 0.8 * Max([Portfolio Rows/reported_months_since_acquisition]), \"Not Reconciled\", \"Payments in Under 80% of Months\"))))), \"No Payments\", \"Not Reconciled\", \"Payments in Under 80% of Months\"), 1, 0) + If(If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\"))) = \"Not Reconciled\", 1, 0) + If(If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0) and [Portfolio Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\") = \"Received\", 0, 1)",
+     "name": "Issues",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "pf",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Portfolio Rows/portfolio_feed_received_flag] and [Portfolio Rows/portfolio_feed_due_flag], 1, 0)) = 0, If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Portfolio Rows/portfolio_feed_received_flag] and Not [Portfolio Rows/portfolio_feed_due_flag], 1, 0)) > 0, \"Not Yet Received\", \"Received\"), If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), 1, 0)) = 1, \"Not Received\", Text(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Portfolio Rows/portfolio_feed_received_flag] and [Portfolio Rows/portfolio_feed_due_flag], 1, 0))) & \" Months Missing\"))",
+     "name": "Portfolio Feed"
+    },
+    {
+     "id": "cf",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_status]))",
+     "name": "Case Feed"
+    },
+    {
+     "id": "ov",
+     "formula": "If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date]))) or Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date])) = 0, Null, (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_overlap_to_date]))) / (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date]))))",
+     "name": "Months Overlap %",
+     "format": {
+      "kind": "number",
+      "formatString": ",.1%"
+     }
+    },
+    {
+     "id": "cs",
+     "formula": "If(Not (Max(If([Portfolio Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(Min(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and [Portfolio Rows/portfolio_feed_received_flag], If([Portfolio Rows/collections_reconciled_flag], 1, 0))) = 1, \"Reconciled\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections]))), \"No Payments\", If(Max([Portfolio Rows/case_payment_months_since_acquisition]) >= 0.8 * Max([Portfolio Rows/reported_months_since_acquisition]), \"Not Reconciled\", \"Payments in Under 80% of Months\")))))",
+     "name": "Collections"
+    },
+    {
+     "id": "bs",
+     "formula": "If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), If([Portfolio Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\")))",
+     "name": "Balance"
+    },
+    {
+     "id": "fc",
+     "formula": "If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0) and [Portfolio Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\")",
+     "name": "Forecast"
+    },
+    {
+     "id": "price",
+     "formula": "Max([Portfolio Rows/purchase_price])",
+     "name": "Purchase Price",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "refs",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/refs_reported]))",
+     "name": "Combined Ref Count",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "ovm",
+     "formula": "Text(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_overlap_to_date]))) & \" / \" & Text(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date])))",
+     "name": "Months Overlap"
+    },
+    {
+     "id": "pfd",
+     "formula": "If(IsNull(Min([Portfolio Rows/portfolio_feed_first_month])), \"Never\", DateFormat(Min([Portfolio Rows/portfolio_feed_first_month]), \"%b %Y\") & \" \u2013 \" & If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_last_month]))), \"Stopped\", DateFormat(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_last_month])), \"%b %Y\")))",
+     "name": "Portfolio Feed Dates"
+    },
+    {
+     "id": "cfd",
+     "formula": "If(IsNull(Min([Portfolio Rows/case_feed_first_month])), \"Never\", DateFormat(Min([Portfolio Rows/case_feed_first_month]), \"%b %Y\") & \" \u2013 \" & If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_last_month]))), \"Stopped\", DateFormat(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_last_month])), \"%b %Y\")))",
+     "name": "Case Feed Dates"
+    },
+    {
+     "id": "rc",
+     "formula": "Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))",
+     "name": "Collections Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "lc",
+     "formula": "Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections]))",
+     "name": "Collections Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "cd",
+     "formula": "If(Not (Max(If([Portfolio Rows/case_payments_loaded_flag], 1, 0)) = 1) or (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))) = 0, Null, (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections]))) / (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))) - 1)",
+     "name": "Collections Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "gap",
+     "formula": "If(Not (Max(If([Portfolio Rows/case_payments_loaded_flag], 1, 0)) = 1), Null, (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/portfolio_feed_collections]))) - Coalesce(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Portfolio Rows/case_feed_collections])), 0))",
+     "name": "Not in Case Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "rb",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))",
+     "name": "Balance Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "lb",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))",
+     "name": "Balance Case Feed (Open Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "bd",
+     "formula": "If((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) = 0, Null, (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))) / (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/portfolio_feed_balance]))) - 1)",
+     "name": "Balance Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "lba",
+     "formula": "(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_balance]))) + Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/closed_cases_balance])), 0)",
+     "name": "Balance Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "cso",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_open_cases]))",
+     "name": "Cases (Open)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "csa",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/case_feed_cases]))",
+     "name": "Cases (All)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "inview",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), 1, 0)) > 0, \"Yes\", \"No\")",
+     "name": "In View"
+    },
+    {
+     "id": "ovfull",
+     "formula": "If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_overlap_to_date])) = Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Portfolio Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Portfolio Rows/reporting_month])))) = 0), [Portfolio Rows/months_reported_to_date])), \"Full\", \"Gaps\")",
+     "name": "Months Overlap Full"
+    }
+   ],
+   "groupings": [
+    {
+     "id": "g",
+     "groupBy": [
+      "k_port",
+      "k_deal",
+      "k_srv",
+      "k_cty",
+      "k_cur"
+     ],
+     "calculations": [
+      "st",
+      "issues",
+      "pf",
+      "cf",
+      "ov",
+      "cs",
+      "bs",
+      "fc",
+      "price",
+      "refs",
+      "ovm",
+      "pfd",
+      "cfd",
+      "rc",
+      "lc",
+      "cd",
+      "gap",
+      "rb",
+      "lb",
+      "bd",
+      "lba",
+      "cso",
+      "csa",
+      "inview",
+      "ovfull"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ref_by_ref",
+   "kind": "table",
+   "name": "ref by ref",
+   "source": {
+    "kind": "table",
+    "elementId": "ref_rows"
+   },
+   "columns": [
+    {
+     "id": "k_port",
+     "formula": "[Combined Ref Rows/portfolio_name]",
+     "name": "Portfolio Name"
+    },
+    {
+     "id": "k_ref",
+     "formula": "[Combined Ref Rows/combined_ref]",
+     "name": "Combined Ref"
+    },
+    {
+     "id": "k_deal",
+     "formula": "[Combined Ref Rows/deal]",
+     "name": "Deal"
+    },
+    {
+     "id": "k_srv",
+     "formula": "[Combined Ref Rows/servicer]",
+     "name": "Servicer"
+    },
+    {
+     "id": "k_cty",
+     "formula": "[Combined Ref Rows/country_name]",
+     "name": "Country"
+    },
+    {
+     "id": "k_cur",
+     "formula": "[Combined Ref Rows/currency]",
+     "name": "Currency"
+    },
+    {
+     "id": "st",
+     "formula": "If((If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Combined Ref Rows/portfolio_feed_received_flag] and [Combined Ref Rows/portfolio_feed_due_flag], 1, 0)) > 0, 1, 0) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_status])) = \"Received\", 0, 1) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_overlap_to_date])) < Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date])), 1, 0) + If(In(If(Not (Max(If([Combined Ref Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections]))), \"No Payments\", If((Abs((Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) - (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections])))) <= 0.1 * Abs(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) and (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) <> 0), \"Reconciled\", \"Not Reconciled\")))), \"No Payments\", \"Not Reconciled\", \"Payments in Under 80% of Months\"), 1, 0) + If(If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\"))) = \"Not Reconciled\", 1, 0) + If(If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0) and [Combined Ref Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\") = \"Received\", 0, 1)) > 0, \"Needs Action\", \"Healthy\")",
+     "name": "Status"
+    },
+    {
+     "id": "issues",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Combined Ref Rows/portfolio_feed_received_flag] and [Combined Ref Rows/portfolio_feed_due_flag], 1, 0)) > 0, 1, 0) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_status])) = \"Received\", 0, 1) + If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_overlap_to_date])) < Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date])), 1, 0) + If(In(If(Not (Max(If([Combined Ref Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections]))), \"No Payments\", If((Abs((Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) - (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections])))) <= 0.1 * Abs(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) and (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) <> 0), \"Reconciled\", \"Not Reconciled\")))), \"No Payments\", \"Not Reconciled\", \"Payments in Under 80% of Months\"), 1, 0) + If(If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\"))) = \"Not Reconciled\", 1, 0) + If(If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0) and [Combined Ref Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\") = \"Received\", 0, 1)",
+     "name": "Issues",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "pf",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Combined Ref Rows/portfolio_feed_received_flag] and [Combined Ref Rows/portfolio_feed_due_flag], 1, 0)) = 0, If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Combined Ref Rows/portfolio_feed_received_flag] and Not [Combined Ref Rows/portfolio_feed_due_flag], 1, 0)) > 0, \"Not Yet Received\", \"Received\"), If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), 1, 0)) = 1, \"Not Received\", Text(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)) and Not [Combined Ref Rows/portfolio_feed_received_flag] and [Combined Ref Rows/portfolio_feed_due_flag], 1, 0))) & \" Months Missing\"))",
+     "name": "Portfolio Feed"
+    },
+    {
+     "id": "cf",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_status]))",
+     "name": "Case Feed"
+    },
+    {
+     "id": "ov",
+     "formula": "If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date]))) or Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date])) = 0, Null, (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_overlap_to_date]))) / (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date]))))",
+     "name": "Months Overlap %",
+     "format": {
+      "kind": "number",
+      "formatString": ",.1%"
+     }
+    },
+    {
+     "id": "cs",
+     "formula": "If(Not (Max(If([Combined Ref Rows/case_payments_loaded_flag], 1, 0)) = 1), \"Not Loaded by Brocc\", If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))), If(Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1, \"No Portfolio Feed\", \"Not Yet Received\"), If(IsNull(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections]))), \"No Payments\", If((Abs((Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) - (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections])))) <= 0.1 * Abs(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) and (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) <> 0), \"Reconciled\", \"Not Reconciled\"))))",
+     "name": "Collections"
+    },
+    {
+     "id": "bs",
+     "formula": "If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and Not (Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), If([Combined Ref Rows/portfolio_feed_due_flag], 1, 0))), 1) = 1), \"Not Yet Received\", If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) or IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))), \"Not Compared\", If((Abs((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) - (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance])))) <= 0.1 * Abs(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) and (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) <> 0), \"Reconciled\", \"Not Reconciled\")))",
+     "name": "Balance"
+    },
+    {
+     "id": "fc",
+     "formula": "If(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0) and [Combined Ref Rows/forecast_received_flag], 1, 0)) = 1, \"Received\", \"Not Received\")",
+     "name": "Forecast"
+    },
+    {
+     "id": "price",
+     "formula": "Max([Combined Ref Rows/purchase_price])",
+     "name": "Purchase Price",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "ovm",
+     "formula": "Text(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_overlap_to_date]))) & \" / \" & Text(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/months_reported_to_date])))",
+     "name": "Months Overlap"
+    },
+    {
+     "id": "pfd",
+     "formula": "If(IsNull(Min([Combined Ref Rows/portfolio_feed_first_month])), \"Never\", DateFormat(Min([Combined Ref Rows/portfolio_feed_first_month]), \"%b %Y\") & \" \u2013 \" & If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_last_month]))), \"Stopped\", DateFormat(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_last_month])), \"%b %Y\")))",
+     "name": "Portfolio Feed Dates"
+    },
+    {
+     "id": "cfd",
+     "formula": "If(IsNull(Min([Combined Ref Rows/case_feed_first_month])), \"Never\", DateFormat(Min([Combined Ref Rows/case_feed_first_month]), \"%b %Y\") & \" \u2013 \" & If(IsNull(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_last_month]))), \"Stopped\", DateFormat(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_last_month])), \"%b %Y\")))",
+     "name": "Case Feed Dates"
+    },
+    {
+     "id": "rc",
+     "formula": "Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))",
+     "name": "Collections Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "lc",
+     "formula": "Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections]))",
+     "name": "Collections Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "cd",
+     "formula": "If(Not (Max(If([Combined Ref Rows/case_payments_loaded_flag], 1, 0)) = 1) or (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) = 0, Null, (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections]))) / (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) - 1)",
+     "name": "Collections Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "gap",
+     "formula": "If(Not (Max(If([Combined Ref Rows/case_payments_loaded_flag], 1, 0)) = 1), Null, (Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/portfolio_feed_collections]))) - Coalesce(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), [Combined Ref Rows/case_feed_collections])), 0))",
+     "name": "Not in Case Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "rb",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))",
+     "name": "Balance Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "lb",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))",
+     "name": "Balance Case Feed (Open Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "bd",
+     "formula": "If((Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) = 0, Null, (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))) / (Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/portfolio_feed_balance]))) - 1)",
+     "name": "Balance Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "lba",
+     "formula": "(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_balance]))) + Coalesce(Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/closed_cases_balance])), 0)",
+     "name": "Balance Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "cso",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_open_cases]))",
+     "name": "Cases (Open)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "csa",
+     "formula": "Max(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) = 0), [Combined Ref Rows/case_feed_cases]))",
+     "name": "Cases (All)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "inview",
+     "formula": "If(Sum(If((DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) >= 0 and DateDiff(\"month\", DateTrunc(\"month\", [Combined Ref Rows/reporting_month]), DateTrunc(\"month\", GrandTotal(Max([Combined Ref Rows/reporting_month])))) < Switch([Quick-Filter-Months], \"Latest Month\", 1, \"Last 3 Months\", 3, \"Last 6 Months\", 6, \"Last 12 Months\", 12, 100000)), 1, 0)) > 0, \"Yes\", \"No\")",
+     "name": "In View"
+    }
+   ],
+   "groupings": [
+    {
+     "id": "g",
+     "groupBy": [
+      "k_port",
+      "k_ref",
+      "k_deal",
+      "k_srv",
+      "k_cty",
+      "k_cur"
+     ],
+     "calculations": [
+      "st",
+      "issues",
+      "pf",
+      "cf",
+      "ov",
+      "cs",
+      "bs",
+      "fc",
+      "price",
+      "ovm",
+      "pfd",
+      "cfd",
+      "rc",
+      "lc",
+      "cd",
+      "gap",
+      "rb",
+      "lb",
+      "bd",
+      "lba",
+      "cso",
+      "csa",
+      "inview"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "t_tiles",
+   "kind": "table",
+   "name": "tiles",
+   "source": {
+    "kind": "table",
+    "elementId": "pm_by_port",
+    "groupingId": "g"
+   },
+   "columns": [
+    {
+     "id": "t_k_port",
+     "formula": "[pm by portfolio/Portfolio Name]",
+     "name": "Portfolio Name"
+    },
+    {
+     "id": "t_pf",
+     "formula": "[pm by portfolio/Portfolio Feed]",
+     "name": "Portfolio Feed"
+    },
+    {
+     "id": "t_cf",
+     "formula": "[pm by portfolio/Case Feed]",
+     "name": "Case Feed"
+    },
+    {
+     "id": "t_cs",
+     "formula": "[pm by portfolio/Collections]",
+     "name": "Collections"
+    },
+    {
+     "id": "t_bs",
+     "formula": "[pm by portfolio/Balance]",
+     "name": "Balance"
+    },
+    {
+     "id": "t_fc",
+     "formula": "[pm by portfolio/Forecast]",
+     "name": "Forecast"
+    },
+    {
+     "id": "t_inview",
+     "formula": "[pm by portfolio/In View]",
+     "name": "In View"
+    },
+    {
+     "id": "t_ovfull",
+     "formula": "[pm by portfolio/Months Overlap Full]",
+     "name": "Months Overlap Full"
+    }
+   ],
+   "filters": [
+    {
+     "id": "in_view_t_inview",
+     "columnId": "t_inview",
+     "kind": "list",
+     "mode": "exclude",
+     "values": [
+      "No"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "band",
+   "kind": "container",
+   "spacing": "medium",
+   "style": {
+    "backgroundColor": "#012E26",
+    "borderColor": "#DCE3DF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   }
+  },
+  {
+   "id": "band_sub",
+   "kind": "text",
+   "body": "<span style=\"color: #D8E494\">**{{\"Checks for \" & [Servicer] & \", \" & DateFormat(Max([Portfolio Months/reporting_month]), \"%b %Y\") & \" \u00b7 reports due by \" & DateFormat(DateAdd(\"day\", 15, Max([Portfolio Months/reporting_month])), \"%d %b %Y\")}}**</span>"
+  },
+  {
+   "id": "k_pf",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Portfolio Feed Received",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Portfolios whose monthly report came in",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If([tiles/Portfolio Feed] = \"Not Yet Received\", 0, 1)) = 0 and Sum(If([tiles/Portfolio Feed] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Portfolio Feed], \"Received\"), 1, 0))) & \" / \" & Text(Sum(If([tiles/Portfolio Feed] = \"Not Yet Received\", 0, 1))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Portfolio Feed], \"Received\"), 1, 0))) / (Sum(If([tiles/Portfolio Feed] = \"Not Yet Received\", 0, 1))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "k_cf",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Case Feed Received",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Portfolios whose case list came in",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If([tiles/Case Feed] = \"Not Yet Received\", 0, 1)) = 0 and Sum(If([tiles/Case Feed] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Case Feed], \"Received\"), 1, 0))) & \" / \" & Text(Sum(If([tiles/Case Feed] = \"Not Yet Received\", 0, 1))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Case Feed], \"Received\"), 1, 0))) / (Sum(If([tiles/Case Feed] = \"Not Yet Received\", 0, 1))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "k_ov",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Months Overlap",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Both feeds every month since Jun 2014",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If([tiles/Months Overlap Full] = \"Not Yet Received\", 0, 1)) = 0 and Sum(If([tiles/Months Overlap Full] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Months Overlap Full], \"Full\"), 1, 0))) & \" / \" & Text(Sum(If([tiles/Months Overlap Full] = \"Not Yet Received\", 0, 1))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Months Overlap Full], \"Full\"), 1, 0))) / (Sum(If([tiles/Months Overlap Full] = \"Not Yet Received\", 0, 1))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "k_cs",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Collections Reconciled",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Case payments match the report, as on Servicing",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If(In([tiles/Collections], \"Reconciled\", \"Not Reconciled\", \"No Payments\", \"Payments in Under 80% of Months\"), 1, 0)) = 0 and Sum(If([tiles/Collections] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Collections], \"Reconciled\"), 1, 0))) & \" / \" & Text(Sum(If(In([tiles/Collections], \"Reconciled\", \"Not Reconciled\", \"No Payments\", \"Payments in Under 80% of Months\"), 1, 0))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Collections], \"Reconciled\"), 1, 0))) / (Sum(If(In([tiles/Collections], \"Reconciled\", \"Not Reconciled\", \"No Payments\", \"Payments in Under 80% of Months\"), 1, 0))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "k_bs",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Balance Reconciled",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Open-case balance within 10% of the report",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If(In([tiles/Balance], \"Reconciled\", \"Not Reconciled\"), 1, 0)) = 0 and Sum(If([tiles/Balance] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Balance], \"Reconciled\"), 1, 0))) & \" / \" & Text(Sum(If(In([tiles/Balance], \"Reconciled\", \"Not Reconciled\"), 1, 0))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Balance], \"Reconciled\"), 1, 0))) / (Sum(If(In([tiles/Balance], \"Reconciled\", \"Not Reconciled\"), 1, 0))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "k_fc",
+   "kind": "kpi-chart",
+   "name": {
+    "text": "Forecast Received",
+    "fontSize": 14,
+    "fontWeight": "bold",
+    "color": "#1D5B4D"
+   },
+   "source": {
+    "kind": "table",
+    "elementId": "t_tiles"
+   },
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   },
+   "description": {
+    "text": "Portfolios with a servicer forecast",
+    "visibility": "shown",
+    "color": "#5C6B66"
+   },
+   "columns": [
+    {
+     "id": "v",
+     "formula": "If(Sum(If([tiles/Forecast] = \"Not Yet Received\", 0, 1)) = 0 and Sum(If([tiles/Forecast] = \"Not Yet Received\", 1, 0)) > 0, \"Not Yet Due\", Text(Sum(If(In([tiles/Forecast], \"Received\"), 1, 0))) & \" / \" & Text(Sum(If([tiles/Forecast] = \"Not Yet Received\", 0, 1))) & \"  \u00b7  \" & Text(Round(100 * (Sum(If(In([tiles/Forecast], \"Received\"), 1, 0))) / (Sum(If([tiles/Forecast] = \"Not Yet Received\", 0, 1))), 0)) & \"%\")",
+     "name": " "
+    }
+   ],
+   "value": {
+    "columnId": "v",
+    "fontSize": 26,
+    "color": "#012E26"
+   },
+   "layout": {
+    "anchor": "center"
+   }
+  },
+  {
+   "id": "port_bar",
+   "kind": "container",
+   "spacing": "medium",
+   "style": {
+    "backgroundColor": "#DAE49D",
+    "borderColor": "#DCE3DF",
+    "borderWidth": 0,
+    "borderRadius": "pill"
+   }
+  },
+  {
+   "id": "port_title",
+   "kind": "text",
+   "body": "## **Portfolio Overview**",
+   "verticalAlign": "center"
+  },
+  {
+   "id": "f_show",
+   "kind": "control",
+   "controlType": "segmented",
+   "controlId": "Show",
+   "name": "Show By",
+   "source": {
+    "kind": "manual",
+    "valueType": "text",
+    "values": [
+     "All",
+     "Needs Action",
+     "Healthy"
+    ]
+   },
+   "value": "All",
+   "showClearLabel": false
+  },
+  {
+   "id": "f_showby",
+   "kind": "control",
+   "controlType": "segmented",
+   "controlId": "Show-By",
+   "name": "Group By",
+   "source": {
+    "kind": "manual",
+    "valueType": "text",
+    "values": [
+     "By Portfolio",
+     "By Combined Ref"
+    ],
+    "labels": [
+     "Portfolio",
+     "Combined REF"
+    ]
+   },
+   "value": "By Portfolio",
+   "showClearLabel": false,
+   "actions": [
+    {
+     "id": "show_by_0",
+     "name": "Show By Portfolio",
+     "trigger": {
+      "on": "on-change",
+      "condition": {
+       "type": "constant",
+       "cond": "=",
+       "value": {
+        "type": "text",
+        "value": "By Portfolio"
+       }
+      }
+     },
+     "effects": [
+      {
+       "effect": "select-tab",
+       "tabbedContainerElementId": "tabs",
+       "selectedTab": {
+        "type": "tab",
+        "index": 0
+       }
+      }
+     ]
+    },
+    {
+     "id": "show_by_1",
+     "name": "Show By Combined Ref",
+     "trigger": {
+      "on": "on-change",
+      "condition": {
+       "type": "constant",
+       "cond": "=",
+       "value": {
+        "type": "text",
+        "value": "By Combined Ref"
+       }
+      }
+     },
+     "effects": [
+      {
+       "effect": "select-tab",
+       "tabbedContainerElementId": "tabs",
+       "selectedTab": {
+        "type": "tab",
+        "index": 1
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tabs",
+   "kind": "tabbed-container",
+   "tabs": [
+    {
+     "name": "By Portfolio"
+    },
+    {
+     "name": "By Combined Ref"
+    }
+   ],
+   "tabBar": {
+    "alignment": "left",
+    "size": "medium",
+    "style": "open",
+    "visibility": "hidden"
+   }
+  },
+  {
+   "id": "t_port",
+   "kind": "table",
+   "name": "By Portfolio",
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderColor": "#DCE3DF",
+    "borderRadius": "round",
+    "borderWidth": 1
+   },
+   "description": "Biggest purchase price first \u00b7 click a header to sort",
+   "source": {
+    "kind": "table",
+    "elementId": "pm_by_port",
+    "groupingId": "g"
+   },
+   "columns": [
+    {
+     "id": "v_k_port",
+     "formula": "[pm by portfolio/Portfolio Name]",
+     "name": "Portfolio Name"
+    },
+    {
+     "id": "v_k_deal",
+     "formula": "[pm by portfolio/Deal]",
+     "name": "Deal"
+    },
+    {
+     "id": "v_k_cty",
+     "formula": "[pm by portfolio/Country]",
+     "name": "Country"
+    },
+    {
+     "id": "v_k_cur",
+     "formula": "[pm by portfolio/Currency]",
+     "name": "Currency"
+    },
+    {
+     "id": "v_st",
+     "formula": "[pm by portfolio/Status]",
+     "name": "Status"
+    },
+    {
+     "id": "v_issues",
+     "formula": "[pm by portfolio/Issues]",
+     "name": "Issues",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_pf",
+     "formula": "[pm by portfolio/Portfolio Feed]",
+     "name": "Portfolio Feed"
+    },
+    {
+     "id": "v_cf",
+     "formula": "[pm by portfolio/Case Feed]",
+     "name": "Case Feed"
+    },
+    {
+     "id": "v_ov",
+     "formula": "[pm by portfolio/Months Overlap %]",
+     "name": "Months Overlap %",
+     "format": {
+      "kind": "number",
+      "formatString": ",.1%"
+     }
+    },
+    {
+     "id": "v_cs",
+     "formula": "[pm by portfolio/Collections]",
+     "name": "Collections"
+    },
+    {
+     "id": "v_bs",
+     "formula": "[pm by portfolio/Balance]",
+     "name": "Balance"
+    },
+    {
+     "id": "v_fc",
+     "formula": "[pm by portfolio/Forecast]",
+     "name": "Forecast"
+    },
+    {
+     "id": "v_price",
+     "formula": "[pm by portfolio/Purchase Price]",
+     "name": "Purchase Price",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_refs",
+     "formula": "[pm by portfolio/Combined Ref Count]",
+     "name": "Combined Ref Count",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_ovm",
+     "formula": "[pm by portfolio/Months Overlap]",
+     "name": "Months Overlap"
+    },
+    {
+     "id": "v_pfd",
+     "formula": "[pm by portfolio/Portfolio Feed Dates]",
+     "name": "Portfolio Feed Dates"
+    },
+    {
+     "id": "v_cfd",
+     "formula": "[pm by portfolio/Case Feed Dates]",
+     "name": "Case Feed Dates"
+    },
+    {
+     "id": "v_rc",
+     "formula": "[pm by portfolio/Collections Portfolio Feed]",
+     "name": "Collections Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_lc",
+     "formula": "[pm by portfolio/Collections Case Feed (All Cases)]",
+     "name": "Collections Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_cd",
+     "formula": "[pm by portfolio/Collections Difference %]",
+     "name": "Collections Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "v_gap",
+     "formula": "[pm by portfolio/Not in Case Feed]",
+     "name": "Not in Case Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_rb",
+     "formula": "[pm by portfolio/Balance Portfolio Feed]",
+     "name": "Balance Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_lb",
+     "formula": "[pm by portfolio/Balance Case Feed (Open Cases)]",
+     "name": "Balance Case Feed (Open Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_bd",
+     "formula": "[pm by portfolio/Balance Difference %]",
+     "name": "Balance Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "v_lba",
+     "formula": "[pm by portfolio/Balance Case Feed (All Cases)]",
+     "name": "Balance Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_cso",
+     "formula": "[pm by portfolio/Cases (Open)]",
+     "name": "Cases (Open)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_csa",
+     "formula": "[pm by portfolio/Cases (All)]",
+     "name": "Cases (All)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_inview",
+     "formula": "[pm by portfolio/In View]",
+     "name": "In View",
+     "hidden": true
+    },
+    {
+     "id": "v_show",
+     "formula": "If([Show] = \"All\" or [Show] = [Status], \"Yes\", \"No\")",
+     "name": "Shown",
+     "hidden": true
+    }
+   ],
+   "conditionalFormats": [
+    {
+     "id": "cf0",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Loaded by Brocc",
+     "style": {
+      "color": "#5C6B66",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf1",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Compared",
+     "style": {
+      "color": "#5C6B66",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf2",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Received",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf3",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Reconciled",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf4",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Healthy",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf5",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Partly Received",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf6",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Under Another Ref",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf7",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Payments in Under 80% of Months",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf8",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Yet Received",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf9",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Received",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf10",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Stopped",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf11",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Reconciled",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf12",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "No Payments",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf13",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "No Portfolio Feed",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf14",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Needs Action",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf15",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "Contains",
+     "value": "Missing",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "ov_scale",
+     "type": "backgroundScale",
+     "columnIds": [
+      "v_ov"
+     ],
+     "scheme": [
+      "#F4C7C7",
+      "#FBE0C3",
+      "#C6E5C9"
+     ],
+     "domain": {
+      "min": 0,
+      "mid": 0.5,
+      "max": 1
+     }
+    },
+    {
+     "id": "diff_scale",
+     "type": "backgroundScale",
+     "columnIds": [
+      "v_cd",
+      "v_bd"
+     ],
+     "scheme": [
+      "#F4C7C7",
+      "#C6E5C9",
+      "#F4C7C7"
+     ],
+     "domain": {
+      "min": -0.5,
+      "mid": 0,
+      "max": 0.5
+     }
+    }
+   ],
+   "filters": [
+    {
+     "id": "in_view_v_inview",
+     "columnId": "v_inview",
+     "kind": "list",
+     "mode": "exclude",
+     "values": [
+      "No"
+     ]
+    },
+    {
+     "id": "in_view_v_show",
+     "columnId": "v_show",
+     "kind": "list",
+     "mode": "exclude",
+     "values": [
+      "No"
+     ]
+    }
+   ],
+   "sort": [
+    {
+     "columnId": "v_price",
+     "direction": "descending",
+     "nulls": "last"
+    }
+   ]
+  },
+  {
+   "id": "t_ref",
+   "kind": "table",
+   "name": "By Combined Ref",
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderColor": "#DCE3DF",
+    "borderRadius": "round",
+    "borderWidth": 1
+   },
+   "description": "Combined Ref = the ID Intrum knows it by; other servicers call it the Portfolio ID",
+   "source": {
+    "kind": "table",
+    "elementId": "ref_by_ref",
+    "groupingId": "g"
+   },
+   "columns": [
+    {
+     "id": "v_k_port",
+     "formula": "[ref by ref/Portfolio Name]",
+     "name": "Portfolio Name"
+    },
+    {
+     "id": "v_k_ref",
+     "formula": "[ref by ref/Combined Ref]",
+     "name": "Combined Ref"
+    },
+    {
+     "id": "v_k_deal",
+     "formula": "[ref by ref/Deal]",
+     "name": "Deal"
+    },
+    {
+     "id": "v_k_cty",
+     "formula": "[ref by ref/Country]",
+     "name": "Country"
+    },
+    {
+     "id": "v_k_cur",
+     "formula": "[ref by ref/Currency]",
+     "name": "Currency"
+    },
+    {
+     "id": "v_st",
+     "formula": "[ref by ref/Status]",
+     "name": "Status"
+    },
+    {
+     "id": "v_issues",
+     "formula": "[ref by ref/Issues]",
+     "name": "Issues",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_pf",
+     "formula": "[ref by ref/Portfolio Feed]",
+     "name": "Portfolio Feed"
+    },
+    {
+     "id": "v_cf",
+     "formula": "[ref by ref/Case Feed]",
+     "name": "Case Feed"
+    },
+    {
+     "id": "v_ov",
+     "formula": "[ref by ref/Months Overlap %]",
+     "name": "Months Overlap %",
+     "format": {
+      "kind": "number",
+      "formatString": ",.1%"
+     }
+    },
+    {
+     "id": "v_cs",
+     "formula": "[ref by ref/Collections]",
+     "name": "Collections"
+    },
+    {
+     "id": "v_bs",
+     "formula": "[ref by ref/Balance]",
+     "name": "Balance"
+    },
+    {
+     "id": "v_fc",
+     "formula": "[ref by ref/Forecast]",
+     "name": "Forecast"
+    },
+    {
+     "id": "v_price",
+     "formula": "[ref by ref/Purchase Price]",
+     "name": "Purchase Price",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_ovm",
+     "formula": "[ref by ref/Months Overlap]",
+     "name": "Months Overlap"
+    },
+    {
+     "id": "v_pfd",
+     "formula": "[ref by ref/Portfolio Feed Dates]",
+     "name": "Portfolio Feed Dates"
+    },
+    {
+     "id": "v_cfd",
+     "formula": "[ref by ref/Case Feed Dates]",
+     "name": "Case Feed Dates"
+    },
+    {
+     "id": "v_rc",
+     "formula": "[ref by ref/Collections Portfolio Feed]",
+     "name": "Collections Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_lc",
+     "formula": "[ref by ref/Collections Case Feed (All Cases)]",
+     "name": "Collections Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_cd",
+     "formula": "[ref by ref/Collections Difference %]",
+     "name": "Collections Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "v_gap",
+     "formula": "[ref by ref/Not in Case Feed]",
+     "name": "Not in Case Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_rb",
+     "formula": "[ref by ref/Balance Portfolio Feed]",
+     "name": "Balance Portfolio Feed",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_lb",
+     "formula": "[ref by ref/Balance Case Feed (Open Cases)]",
+     "name": "Balance Case Feed (Open Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_bd",
+     "formula": "[ref by ref/Balance Difference %]",
+     "name": "Balance Difference %",
+     "format": {
+      "kind": "number",
+      "formatString": "+,.1%"
+     }
+    },
+    {
+     "id": "v_lba",
+     "formula": "[ref by ref/Balance Case Feed (All Cases)]",
+     "name": "Balance Case Feed (All Cases)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.2f"
+     }
+    },
+    {
+     "id": "v_cso",
+     "formula": "[ref by ref/Cases (Open)]",
+     "name": "Cases (Open)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_csa",
+     "formula": "[ref by ref/Cases (All)]",
+     "name": "Cases (All)",
+     "format": {
+      "kind": "number",
+      "formatString": ",.0f"
+     }
+    },
+    {
+     "id": "v_inview",
+     "formula": "[ref by ref/In View]",
+     "name": "In View",
+     "hidden": true
+    },
+    {
+     "id": "v_show",
+     "formula": "If([Show] = \"All\" or [Show] = [Status], \"Yes\", \"No\")",
+     "name": "Shown",
+     "hidden": true
+    }
+   ],
+   "conditionalFormats": [
+    {
+     "id": "cf0",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Loaded by Brocc",
+     "style": {
+      "color": "#5C6B66",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf1",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Compared",
+     "style": {
+      "color": "#5C6B66",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf2",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Received",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf3",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Reconciled",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf4",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Healthy",
+     "style": {
+      "color": "#1E6B24",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf5",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Partly Received",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf6",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Under Another Ref",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf7",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Payments in Under 80% of Months",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf8",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Yet Received",
+     "style": {
+      "color": "#9A3412",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf9",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Received",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf10",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Stopped",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf11",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Not Reconciled",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf12",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "No Payments",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf13",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "No Portfolio Feed",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf14",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "=",
+     "value": "Needs Action",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "cf15",
+     "type": "single",
+     "columnIds": [
+      "v_pf",
+      "v_cf",
+      "v_cs",
+      "v_bs",
+      "v_fc",
+      "v_st"
+     ],
+     "condition": "Contains",
+     "value": "Missing",
+     "style": {
+      "color": "#A61B1B",
+      "bold": true
+     }
+    },
+    {
+     "id": "ov_scale",
+     "type": "backgroundScale",
+     "columnIds": [
+      "v_ov"
+     ],
+     "scheme": [
+      "#F4C7C7",
+      "#FBE0C3",
+      "#C6E5C9"
+     ],
+     "domain": {
+      "min": 0,
+      "mid": 0.5,
+      "max": 1
+     }
+    },
+    {
+     "id": "diff_scale",
+     "type": "backgroundScale",
+     "columnIds": [
+      "v_cd",
+      "v_bd"
+     ],
+     "scheme": [
+      "#F4C7C7",
+      "#C6E5C9",
+      "#F4C7C7"
+     ],
+     "domain": {
+      "min": -0.5,
+      "mid": 0,
+      "max": 0.5
+     }
+    }
+   ],
+   "filters": [
+    {
+     "id": "in_view_v_inview",
+     "columnId": "v_inview",
+     "kind": "list",
+     "mode": "exclude",
+     "values": [
+      "No"
+     ]
+    },
+    {
+     "id": "in_view_v_show",
+     "columnId": "v_show",
+     "kind": "list",
+     "mode": "exclude",
+     "values": [
+      "No"
+     ]
+    }
+   ],
+   "sort": [
+    {
+     "columnId": "v_price",
+     "direction": "descending",
+     "nulls": "last"
+    }
+   ]
+  },
+  {
+   "id": "notes_box",
+   "kind": "container",
+   "spacing": "medium",
+   "style": {
+    "backgroundColor": "#FFFFFF",
+    "borderColor": "#DCE3DF",
+    "borderWidth": 1,
+    "borderRadius": "round"
+   }
+  },
+  {
+   "id": "notes",
+   "kind": "text",
+   "body": "### **Not the Servicer's Fault**\n\nRead these before telling a servicer a figure is wrong. Each is on Brocc's side, and the table shows it in grey, never red.\n\n- **Cerved, Gescobro and Intrum Italy collections: Not Loaded by Brocc.** Cerved and Gescobro send case payments, but brocc-data does not load them into PROD yet. For Intrum Italy it keeps only one payment per case (the file has no transaction ID), so Italy is never reconciled, as on the Servicing dashboard. Their Collections cannot be compared.\n- **Closed cases are left out of the case feed.** Brocc's case table keeps a case on the list after the servicer closes it, with its last balance (Intrum, Aug 2026: 9.0m of 19.5m listed cases, 20.2bn). Balance and Cases compare open cases; the All Cases columns show what the closed ones add. Collections count every payment, closed cases included (0.4\u20130.9% of the money a month).\n- **Under Another Ref (Massey).** Massey's case feed uses its own refs, not the report's: the cases are there, under different IDs.\n- **Not Yet Received.** A report is due by the 15th of the following month (in the past year every Intrum report arrived by the 14th). Until then a missing report is amber and is not counted as an issue.\n- **Servicer from the business rule.** A portfolio with no case feed has no servicer in PROD, so it is named by the manager's rule.\n\n### **The Three Comparisons**\n\nThe portfolio feed (the servicer's monthly report) is the figure trusted; the case feed (the case list and its payments) is checked against it, and they match within \u00b110%.\n\n- **Collections: report against every payment.** Money paid in the month counts on both sides, whether the case is open or closed. The same check, and the same answer, as the Servicing dashboard: within 10%, payments in at least 80% of months since acquisition, month by month; over several months Reconciled only if every month was.\n- **Balance: report against open cases.** The report holds open cases only; the case list keeps closed cases with their last balance. So Balance Difference % uses the open cases, and Balance Case Feed (All Cases) shows what the closed ones would add (Intrum, Aug 2026: 86% of refs match on open cases, 12% on all).\n- **Cases: open against all.** Shows how many closed cases the list still carries. Not yet checked against the report: its case count is not in PROD.\n\nCollections add up over the months shown; balance, cases, status and forecast are at the last month. Amounts are in the Currency column's currency. Months Overlap: months with both feeds, of the months the portfolio feed came, from Jun 2014. Data: Snowflake PROD, NPL_COMMON, portfolios in DIM_PORTFOLIO, from Jun 2014."
+  }
+ ],
+ "layout": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Page type=\"grid\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\" id=\"pg_main\">\n  <Container elementId=\"band\" type=\"grid\" gridColumn=\"1 / 25\" gridRow=\"1 / 12\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\">\n    <Element elementId=\"band_sub\" gridColumn=\"1 / 25\" gridRow=\"1 / 2\"/>\n    <Element elementId=\"k_cf\" gridColumn=\"1 / 9\" gridRow=\"2 / 7\"/>\n    <Element elementId=\"k_pf\" gridColumn=\"9 / 17\" gridRow=\"2 / 7\"/>\n    <Element elementId=\"k_fc\" gridColumn=\"17 / 25\" gridRow=\"2 / 7\"/>\n    <Element elementId=\"k_ov\" gridColumn=\"1 / 9\" gridRow=\"7 / 12\"/>\n    <Element elementId=\"k_cs\" gridColumn=\"9 / 17\" gridRow=\"7 / 12\"/>\n    <Element elementId=\"k_bs\" gridColumn=\"17 / 25\" gridRow=\"7 / 12\"/>\n  </Container>\n  <Container elementId=\"port_bar\" type=\"grid\" gridColumn=\"1 / 25\" gridRow=\"12 / 15\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\">\n    <Element elementId=\"port_title\" gridColumn=\"1 / 11\" gridRow=\"1 / 4\"/>\n    <Element elementId=\"f_showby\" gridColumn=\"11 / 17\" gridRow=\"1 / 4\"/>\n    <Element elementId=\"f_show\" gridColumn=\"17 / 25\" gridRow=\"1 / 4\"/>\n  </Container>\n  <TabbedContainer elementId=\"tabs\" type=\"tabbed-container\" gridColumn=\"1 / 25\" gridRow=\"15 / 49\">\n    <Tab gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\">\n      <Element elementId=\"t_port\" gridColumn=\"1 / 25\" gridRow=\"1 / 34\"/>\n    </Tab>\n    <Tab gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\">\n      <Element elementId=\"t_ref\" gridColumn=\"1 / 25\" gridRow=\"1 / 34\"/>\n    </Tab>\n  </TabbedContainer>\n  <Container elementId=\"notes_box\" type=\"grid\" gridColumn=\"1 / 25\" gridRow=\"49 / 63\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\">\n    <Element elementId=\"notes\" gridColumn=\"1 / 25\" gridRow=\"1 / 14\"/>\n  </Container>\n</Page>\n<Page type=\"grid\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\" id=\"pg_model\">\n  <Element elementId=\"src\" gridColumn=\"1 / 25\" gridRow=\"1 / 12\"/>\n  <Element elementId=\"ref_src\" gridColumn=\"1 / 25\" gridRow=\"12 / 24\"/>\n  <Element elementId=\"pm_rows\" gridColumn=\"1 / 25\" gridRow=\"60 / 72\"/>\n  <Element elementId=\"ref_rows\" gridColumn=\"1 / 25\" gridRow=\"72 / 84\"/>\n  <Element elementId=\"pm_by_port\" gridColumn=\"1 / 25\" gridRow=\"24 / 36\"/>\n  <Element elementId=\"ref_by_ref\" gridColumn=\"1 / 25\" gridRow=\"36 / 48\"/>\n  <Element elementId=\"t_tiles\" gridColumn=\"1 / 25\" gridRow=\"48 / 60\"/>\n</Page>\n<Panel type=\"grid\" gridTemplateColumns=\"repeat(24, 1fr)\" gridTemplateRows=\"auto\" id=\"hdr\">\n  <Element elementId=\"h_title\" gridColumn=\"1 / 13\" gridRow=\"1 / 3\"/>\n  <Element elementId=\"h_sub\" gridColumn=\"1 / 8\" gridRow=\"3 / 4\"/>\n  <Element elementId=\"f_servicer\" gridColumn=\"1 / 4\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_country\" gridColumn=\"4 / 7\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_deal\" gridColumn=\"7 / 10\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_portfolio\" gridColumn=\"10 / 13\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_price\" gridColumn=\"13 / 16\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_range\" gridColumn=\"16 / 20\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"h_clear\" gridColumn=\"20 / 22\" gridRow=\"4 / 7\"/>\n  <Element elementId=\"f_months\" gridColumn=\"1 / 10\" gridRow=\"7 / 9\"/>\n</Panel>\n"
+}
