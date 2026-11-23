@@ -1,0 +1,1 @@
+-- LOK-SE25013 payments per case and month: not built yet; follow ../../HEI-SE17039/bridge_check/payment_months.sql.

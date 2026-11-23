@@ -1,6 +1,6 @@
 """Write ../summary.yaml (loans owned, payments by source, bridge rates) by running the dataset queries.
 
-    uv run python work/workshop/dataset/HEI-SE17039/summary/summary.py
+    uv run python work/hackathon_dataset/HEI-SE17039/summary/summary.py
 """
 
 from __future__ import annotations

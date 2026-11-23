@@ -1,6 +1,6 @@
 """Find the loans Intrum moved from system 1062 to 2080; writes moved_loans.csv and prints the list to paste.
 
-    uv run python work/workshop/dataset/HEI-SE17039/bridge_check/find_moved_loans.py
+    uv run python work/hackathon_dataset/HEI-SE17039/bridge_check/find_moved_loans.py
 """
 
 from __future__ import annotations

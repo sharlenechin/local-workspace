@@ -1,0 +1,1 @@
+-- LOK-SE25013 payments: not built yet; follow ../HEI-SE17039/payments.sql.

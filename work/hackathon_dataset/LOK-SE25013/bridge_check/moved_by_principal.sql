@@ -1,0 +1,1 @@
+-- LOK-SE25013 moved loans by principal: not built yet; follow ../../HEI-SE17039/bridge_check/moved_by_principal.sql.
