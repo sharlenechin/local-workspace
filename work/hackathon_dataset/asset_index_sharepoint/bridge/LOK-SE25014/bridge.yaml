@@ -1,0 +1,64 @@
+version: 1
+bridge:
+  file: aix_blue_case_mapping_overview__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+holding:
+  portfolio_id: SE25014
+  vehicle: LOK
+  servicer_ids:
+  - SE25022
+  shared_ids: []
+instances:
+  '2080': 66
+matches:
+- kind: id
+  file: aix_blue_case_mapping_overview__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 64
+  cases_in_deal: 66
+  cases_matched_by_instance:
+    '2080': 64
+  weak: false
+  tape_rows: 64
+  tape_values: 64
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc_311026__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 64
+  cases_in_deal: 66
+  cases_matched_by_instance:
+    '2080': 64
+  weak: false
+  tape_rows: 64
+  tape_values: 64
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 64
+  cases_in_deal: 66
+  cases_matched_by_instance:
+    '2080': 64
+  weak: false
+  tape_rows: 64
+  tape_values: 64
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+hashed: []

@@ -1,0 +1,119 @@
+version: 1
+bridge:
+  file: OffShoreIIDataSet7 2025-05-13 Loans SEK Komplettering flagga skulder att exkludera.xlsx
+  sheet: CaseDataMain
+  header: LoanNumber
+  cat_column: invoices.invoice_number
+holding:
+  portfolio_id: SE25013
+  vehicle: LOK
+  servicer_ids:
+  - SE25037
+  shared_ids: []
+instances:
+  '2080': 1584
+  '1062': 611
+matches:
+- kind: id
+  file: OffShoreIIDataSet7 2025-05-13 Loans SEK Komplettering flagga skulder att exkludera.xlsx
+  sheet: CaseDataMain
+  header: LoanNumber
+  cat_column: invoices.invoice_number
+  tape_values_found_pct: 53.7
+  cases_matched: 2186
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 603
+    '2080': 1583
+  weak: false
+  tape_rows: 4132
+  tape_values: 4132
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: OffShoreIIDataSet7 2025-05-13 Loans SEK Komplettering flagga skulder att exkludera.xlsx
+  sheet: CaseDataMain
+  header: LoanNumber
+  cat_column: client_ref_1
+  tape_values_found_pct: 8.74
+  cases_matched: 361
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 361
+    '2080': 0
+  weak: true
+  tape_rows: 4132
+  tape_values: 4132
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: OffShoreIIDataSet7 2025-05-13 Loans SEK Komplettering flagga skulder att exkludera.xlsx
+  sheet: CaseDataComparison
+  header: CaseId
+  cat_column: case_id
+  tape_values_found_pct: 0.13
+  cases_matched: 8
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 8
+    '2080': 0
+  weak: true
+  tape_rows: 6105
+  tape_values: 5956
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: OffShoreIIDataSet7 2025-05-13 Loans SEK Komplettering flagga skulder att exkludera.xlsx
+  sheet: CaseDataMain
+  header: SecondaryDebtId
+  cat_column: main_debtor
+  tape_values_found_pct: 0.08
+  cases_matched: 3
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 2
+    '2080': 1
+  weak: true
+  tape_rows: 4132
+  tape_values: 3930
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: amount
+  file: SE26043_SE26044_NOBA_BMK_accounts_v2.csv
+  sheet: null
+  header: registration_balance
+  cat_column: remaining_capital
+  tape_values_found_pct: 97.29
+  cases_matched: 2154
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 595
+    '2080': 1559
+  weak: false
+  tape_rows: 2144
+  tape_values: null
+  unique_in_tape: null
+  unique_with: []
+  one_to_one_pct: 93.66
+- kind: amount
+  file: SE26043_SE26044_NOBA_BMK_accounts_v2.csv
+  sheet: null
+  header: registration_balance
+  cat_column: original_capital
+  tape_values_found_pct: 87.79
+  cases_matched: 1945
+  cases_in_deal: 2195
+  cases_matched_by_instance:
+    '1062': 386
+    '2080': 1559
+  weak: false
+  tape_rows: 2144
+  tape_values: null
+  unique_in_tape: null
+  unique_with: []
+  one_to_one_pct: 84.47
+hashed: []

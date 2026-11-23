@@ -1,0 +1,272 @@
+version: 1
+bridge:
+  file: AssetIndexUploadTemplate_SE25018_02.xlsx
+  sheet: Cases
+  header: Case ID (client)
+  cat_column: case_id
+holding:
+  portfolio_id: SE25008
+  vehicle: LOK
+  servicer_ids:
+  - SE25018
+  shared_ids: []
+instances:
+  '1062': 9712
+  '2080': 4103
+matches:
+- kind: id
+  file: AssetIndexUploadTemplate_SE25018_02.xlsx
+  sheet: Cases
+  header: Case ID (client)
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_blue_case_mapping_overview__case mapping.csv
+  sheet: null
+  header: casecode
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_blue_case_mapping_overview__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc_311026__case mapping.csv
+  sheet: null
+  header: casecode
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc_311026__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc__case mapping.csv
+  sheet: null
+  header: casecode
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: aix_cm_overview_brocc__case mapping.csv
+  sheet: null
+  header: case_id
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 6267
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6267
+    '2080': 0
+  weak: false
+  tape_rows: 6267
+  tape_values: 6267
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: AssetIndexUploadTemplate_SE25018_01.xlsx
+  sheet: Cases
+  header: Case ID (client)
+  cat_column: case_id
+  tape_values_found_pct: 99.97
+  cases_matched: 3445
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 3445
+    '2080': 0
+  weak: false
+  tape_rows: 3446
+  tape_values: 3446
+  unique_in_tape: true
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: AssetIndexUploadTemplate_SE25018_02.xlsx
+  sheet: Adjustments
+  header: Case ID (client)
+  cat_column: case_id
+  tape_values_found_pct: 100.0
+  cases_matched: 1936
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 1936
+    '2080': 0
+  weak: false
+  tape_rows: 5441
+  tape_values: 1936
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: AssetIndexUploadTemplate_SE25018_01.xlsx
+  sheet: Adjustments
+  header: Case ID (client)
+  cat_column: case_id
+  tape_values_found_pct: 99.92
+  cases_matched: 1201
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 1201
+    '2080': 0
+  weak: false
+  tape_rows: 3165
+  tape_values: 1202
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: Project Emmy - Sweden A Data Tape.xlsx
+  sheet: Account level
+  header: Default Amount
+  cat_column: client_ref_1
+  tape_values_found_pct: 0.33
+  cases_matched: 14
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 14
+    '2080': 0
+  weak: true
+  tape_rows: 4313
+  tape_values: 4307
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: Project Emmy - Sweden A Historical Collections.xlsx
+  sheet: Historical Collections
+  header: Gross Payment
+  cat_column: main_debtor
+  tape_values_found_pct: 0.13
+  cases_matched: 10
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 7
+    '2080': 3
+  weak: true
+  tape_rows: 63794
+  tape_values: 7084
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: id
+  file: AssetIndexUploadTemplate_SE25018_01.xlsx
+  sheet: Cases
+  header: Principal (LCY)
+  cat_column: invoices.invoice_number
+  tape_values_found_pct: 0.09
+  cases_matched: 5
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 3
+    '2080': 2
+  weak: true
+  tape_rows: 3446
+  tape_values: 3445
+  unique_in_tape: false
+  unique_with: []
+  one_to_one_pct: null
+- kind: amount
+  file: SE26XXX_BMK_accounts_Brocc 1.csv
+  sheet: null
+  header: registration_balance
+  cat_column: remaining_capital
+  tape_values_found_pct: 88.24
+  cases_matched: 11897
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 8116
+    '2080': 3781
+  weak: false
+  tape_rows: 9190
+  tape_values: null
+  unique_in_tape: null
+  unique_with: []
+  one_to_one_pct: 46.93
+- kind: amount
+  file: Project Emmy - Sweden B Data Tape.xlsx
+  sheet: Account level
+  header: Default Amount
+  cat_column: original_capital
+  tape_values_found_pct: 79.9
+  cases_matched: 8623
+  cases_in_deal: 13815
+  cases_matched_by_instance:
+    '1062': 6270
+    '2080': 2353
+  weak: false
+  tape_rows: 7847
+  tape_values: null
+  unique_in_tape: null
+  unique_with: []
+  one_to_one_pct: 49.8
+hashed: []
