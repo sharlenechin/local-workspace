@@ -78,5 +78,11 @@ monthly_payments_asset_index_vs_warehouse:
       matched_pct: 39.97946
 dataset_rows:
   accounts_sql: 226260
-  payments_sql: 36047
-  payments_sql_amount: 68638546.63
+  payments_sql: 73546
+  payments_sql_by_source:
+    asset_index:
+      rows: 37470
+      amount: 74425749.53
+    warehouse:
+      rows: 36076
+      amount: 68691045.63

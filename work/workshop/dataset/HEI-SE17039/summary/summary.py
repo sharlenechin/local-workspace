@@ -177,7 +177,10 @@ def main() -> None:
         "dataset_rows": {
             "accounts_sql": len(accounts),
             "payments_sql": len(payments),
-            "payments_sql_amount": money(sum(Decimal(v) for v in payments.warehouse_amount)),
+            "payments_sql_by_source": {
+                source: {"rows": len(g), "amount": money(sum(Decimal(v) for v in g.payment_amount))}
+                for source, g in payments.groupby("payment_source")
+            },
         },
     }
     out = DATASET / "summary.yaml"

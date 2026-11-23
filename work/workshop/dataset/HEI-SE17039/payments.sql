@@ -1,10 +1,11 @@
--- SE17039 payments: one row per payment in the warehouse's collections table, for every loan we own.
+-- SE17039 payments: one row per payment for every loan we own, from two sources split at registration.
+-- Before the loan's first registration with Intrum the payment comes from the asset index; from then on, from the warehouse.
+-- payment_source says which, and nothing is filled in where the warehouse is missing payments.
 -- Same loans and model_id as accounts.sql, so the two files join on model_id.
--- Column prefixes: warehouse_ = our warehouse, warehouse_vs_pam_ = check against Intrum's report.
 -- The 607 moved-loan pairs below must match accounts.sql; rebuild them with bridge_check/find_moved_loans.py.
--- This table misses every system 1062 payment and about a quarter of 2080's, because of two dbt bugs.
--- warehouse_reconciles_with_pam is TRUE only if the total is within 10% of PAM's and over 80% of months match.
--- Measured 20 Nov 2026: 36,047 rows, SEK 68,638,546.63, 50.9% below PAM, so FALSE.
+-- The warehouse misses every system 1062 payment and about a quarter of 2080's, because of two dbt bugs.
+-- warehouse_reconciles_with_pam is TRUE only if the warehouse total is within 10% of PAM's and over 80% of months match.
+-- Measured 23 Nov 2026: 37,470 asset-index rows (SEK 74,425,749.53) and 36,076 warehouse rows (SEK 68,691,045.63).
 
 SET portfolio_id = 'SE17039';
 SET max_total_deviation_pct = 10;
@@ -175,7 +176,8 @@ moved_cleaned_cases AS (
 cases_owned AS (
     SELECT
         c.case_bk,
-        s.case_id AS case_id_hashed
+        s.case_id AS case_id_hashed,
+        s.batch_sk
     FROM prod.npl_common.fct_case_snapshot_daily AS s
     INNER JOIN prod.npl_common.dim_batch AS b
         ON b.batch_sk = s.batch_sk
@@ -227,6 +229,89 @@ loan_registration AS (
     INNER JOIN current_cases AS c
         ON c.case_bk = l.case_bk
     GROUP BY l.model_id
+),
+
+-- Each loan's deal and batch, from its current case.
+loan_batch AS (
+    SELECT
+        l.model_id,
+        IFF(
+            b.deal_source_bk = 'HEI' OR dl.deal_bk IS NULL,
+            -- Heimdall books are named vehicle-Intrum id; other deals use their Atlas id.
+            b.deal_source_bk || '-' || b.servicer_parent_portfolio_bk,
+            dl.deal_bk
+        ) AS deal_id,
+        b.servicer_parent_portfolio_bk AS intrum_id
+    FROM case_to_loan AS l
+    INNER JOIN cases_owned AS o
+        ON o.case_bk = l.case_bk
+    INNER JOIN prod.npl_common.dim_batch AS b
+        ON b.batch_sk = o.batch_sk
+    -- Left join, so a batch with an unknown portfolio is not dropped.
+    LEFT JOIN prod.npl_common.dim_portfolio AS pf
+        ON pf.portfolio_sk = b.portfolio_sk
+    LEFT JOIN prod.npl_common.dim_deal AS dl
+        ON dl.deal_id = pf.deal_id
+    WHERE l.case_bk = l.model_id
+),
+
+asset_index_latest_run AS (
+    SELECT run_id
+    FROM asset_index.approved.runs
+    WHERE portfolio_id = $portfolio_id
+        AND source_work_uri LIKE 's3://ml-prod-asset-index-work/%'
+    QUALIFY ROW_NUMBER() OVER (ORDER BY approved_at DESC) = 1
+),
+
+-- Before registration: payments in the asset index (from Intrum's benchmark file).
+payment_before_registration AS (
+    SELECT
+        l.model_id,
+        'asset_index' AS payment_source,
+        p.payment_date,
+        p.payment_amount AS amount,
+        c.currency,
+        p.case_id AS asset_index_case_id,
+        NULL AS warehouse_paid_on_case,
+        NULL AS warehouse_collection_bk,
+        NULL AS warehouse_batch_sk
+    FROM asset_index.approved.payments AS p
+    INNER JOIN asset_index_latest_run AS a
+        ON a.run_id = p._run_id
+    INNER JOIN asset_index.approved.cases AS c
+        ON c._run_id = p._run_id
+        AND c.case_id = p.case_id
+    INNER JOIN case_to_loan AS l
+        ON l.case_bk = p.case_id
+    INNER JOIN loan_registration AS r
+        ON r.model_id = l.model_id
+    WHERE p.payment_date < r.registration_date
+),
+
+-- From registration on: payments in the warehouse; no de-duplication, as rows sharing a COLLECTION_BK are different payments.
+payment_from_registration AS (
+    SELECT
+        l.model_id,
+        'warehouse' AS payment_source,
+        f.collection_date AS payment_date,
+        f.amount,
+        f.currency_id AS currency,
+        NULL AS asset_index_case_id,
+        l.case_bk AS warehouse_paid_on_case,
+        f.collection_bk AS warehouse_collection_bk,
+        f.batch_sk AS warehouse_batch_sk
+    FROM case_to_loan AS l
+    INNER JOIN prod.npl_common.fct_case_collection AS f
+        ON f.case_id = l.case_id_hashed
+    INNER JOIN loan_registration AS r
+        ON r.model_id = l.model_id
+    WHERE f.collection_date >= r.registration_date
+),
+
+payment AS (
+    SELECT * FROM payment_before_registration
+    UNION ALL
+    SELECT * FROM payment_from_registration
 ),
 
 deal_batch AS (
@@ -305,30 +390,28 @@ pam_reconciliation AS (
     FROM compared_month
 )
 
--- No de-duplication: rows sharing a COLLECTION_BK are different payments.
 SELECT
     -- Identifiers and the month; no prefix
-    l.model_id,
+    y.model_id,
     l.previous_model_id,                        -- the old 1062 case, for a loan Intrum moved to 2080
-    SPLIT_PART(l.model_id, '-', 1) AS instance,
-    -- Heimdall books are named vehicle-Intrum id; other deals use their Atlas id.
-    IFF(
-        b.deal_source_bk = 'HEI' OR dl.deal_bk IS NULL,
-        b.deal_source_bk || '-' || b.servicer_parent_portfolio_bk,
-        dl.deal_bk
-    ) AS deal_id,
-    b.servicer_parent_portfolio_bk AS intrum_id,
-    LAST_DAY(f.collection_date) AS month_end,
-    DATEDIFF(MONTH, r.registration_date, f.collection_date) AS months_since_registration,
+    SPLIT_PART(y.model_id, '-', 1) AS instance,
+    d.deal_id,
+    d.intrum_id,
+    LAST_DAY(y.payment_date) AS month_end,
+    DATEDIFF(MONTH, r.registration_date, y.payment_date) AS months_since_registration,
 
-    -- warehouse_: the payment as the warehouse records it
-    l.case_bk AS warehouse_paid_on_case,
-    b.batch_bk AS warehouse_batch_bk,
-    f.collection_bk AS warehouse_collection_bk,
-    f.collection_date AS warehouse_collection_date,
+    -- The payment, and which source it comes from
+    y.payment_source,                           -- asset_index before registration, warehouse from it
+    y.payment_date,
+    y.amount AS payment_amount,
+    y.currency AS payment_currency,
     r.registration_date AS warehouse_registration_date,
-    f.amount AS warehouse_amount,
-    f.currency_id AS warehouse_currency,
+
+    -- Source details; empty for the other source
+    y.asset_index_case_id,
+    y.warehouse_paid_on_case,
+    b.batch_bk AS warehouse_batch_bk,
+    y.warehouse_collection_bk,
 
     -- warehouse_vs_pam_: deal-wide check of warehouse payments against Intrum's monthly report
     ROUND(p.collection_reconciliation_total_pct, 5) AS warehouse_vs_pam_collection_total_pct,
@@ -340,17 +423,14 @@ SELECT
             AND p.collection_month_coverage_pct > $min_month_coverage_pct,
         FALSE
     ) AS warehouse_reconciles_with_pam
-FROM case_to_loan AS l
+FROM payment AS y
 CROSS JOIN pam_reconciliation AS p
-INNER JOIN prod.npl_common.fct_case_collection AS f
-    ON f.case_id = l.case_id_hashed
+INNER JOIN (SELECT DISTINCT model_id, previous_model_id FROM case_to_loan) AS l
+    ON l.model_id = y.model_id
 LEFT JOIN loan_registration AS r
-    ON r.model_id = l.model_id
+    ON r.model_id = y.model_id
+LEFT JOIN loan_batch AS d
+    ON d.model_id = y.model_id
 LEFT JOIN prod.npl_common.dim_batch AS b
-    ON b.batch_sk = f.batch_sk
--- Left join, so a batch with an unknown portfolio is not dropped.
-LEFT JOIN prod.npl_common.dim_portfolio AS pf
-    ON pf.portfolio_sk = b.portfolio_sk
-LEFT JOIN prod.npl_common.dim_deal AS dl
-    ON dl.deal_id = pf.deal_id
-ORDER BY l.model_id, f.collection_date;
+    ON b.batch_sk = y.warehouse_batch_sk
+ORDER BY y.model_id, y.payment_date;
