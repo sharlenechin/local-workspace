@@ -1,1 +1,0 @@
--- LOK-SE25013 payment totals by source: not built yet; follow ../../HEI-SE17039/summary/summary_sources.sql.

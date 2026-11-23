@@ -2,7 +2,7 @@
 -- Column prefixes: asset_index_ = seller's tape, warehouse_ = our warehouse, warehouse_vs_pam_ = check against Intrum's report.
 -- A loan is ours if the warehouse puts one of its cases in an SE17039 batch.
 -- Intrum moved 607 loans from system 1062 to 2080, so each has two cases but is one loan here.
--- For a moved loan, model_id is the new case and previous_model_id the old one.
+-- For a moved loan, model_id is the new case; the old case shows in warehouse_reported_by_case for the months before the move.
 -- The 607 pairs are listed below; rebuild them with bridge_check/find_moved_loans.py.
 -- Warehouse payments are incomplete for this deal, so check warehouse_reconciles_with_pam before using them.
 -- Measured 20 Nov 2026: 2,095 loans, 226,260 rows, runs in about 5 minutes.
@@ -314,7 +314,11 @@ asset_index_case AS (
         a.principal_at_cutoff,
         a.legal_balance_at_cutoff,
         a.accrued_interest_at_cutoff,
-        a.product_type
+        a.other_balances_at_cutoff,
+        a.default_date,
+        a.origination_date,
+        a.product_type,
+        a.sub_portfolio
     FROM asset_index.approved.cases AS a
     INNER JOIN asset_index_latest_run AS r
         ON r.run_id = a._run_id
@@ -341,7 +345,13 @@ asset_index_attribute AS (
         a.entity_id AS case_id,
         MAX(IFF(a.attribute = 'bankruptcy_flag', a.value, NULL)) AS bankruptcy_flag,
         MAX(IFF(a.attribute = 'debt_restructuring_flag', a.value, NULL)) AS debt_restructuring_flag,
-        MAX(IFF(a.attribute = 'postal_region', a.value, NULL)) AS postal_region
+        MAX(IFF(a.attribute = 'enforcement_flag', a.value, NULL)) AS enforcement_flag,
+        MAX(IFF(a.attribute = 'legal_title_flag', a.value, NULL)) AS legal_title_flag,
+        MAX(IFF(a.attribute = 'postal_region', a.value, NULL)) AS postal_region,
+        MIN(IFF(a.attribute = 'limitation_date', TRY_TO_DATE(LEFT(a.value, 10)), NULL)) AS limitation_date,
+        MIN(IFF(a.attribute = 'verdict_date', TRY_TO_DATE(LEFT(a.value, 10)), NULL)) AS verdict_date,
+        MIN(IFF(a.attribute = 'verdict_application_date', TRY_TO_DATE(LEFT(a.value, 10)), NULL))
+            AS verdict_application_date
     FROM asset_index.approved.attributes AS a
     INNER JOIN asset_index_latest_run AS r
         ON r.run_id = a._run_id
@@ -353,7 +363,9 @@ asset_index_attribute AS (
 cleaned_cases_tape AS (
     SELECT
         l.model_id,
-        a.case_id AS tape_case_id
+        a.case_id AS tape_case_id,
+        IFF(a.case_id = l.model_id, 'same_id', 'moved_loan_old_case') AS match_method,
+        NULL AS match_points
     FROM cleaned_cases AS l
     INNER JOIN asset_index_case AS a
         ON a.case_id = l.model_id
@@ -514,29 +526,39 @@ pam_reconciliation AS (
 
 SELECT
     -- Identifiers and the month; no prefix
-    l.model_id,
-    l.previous_model_id,                        -- the old 1062 case, for a loan Intrum moved to 2080
+    l.model_id AS model_id,
     SPLIT_PART(l.model_id, '-', 1) AS instance,
     b.deal_id,
     b.intrum_id,
     t.month_end,
     DATEDIFF(MONTH, l.registration_date, t.month_end) AS months_since_registration,  -- negative before
 
-    -- asset_index_: the seller's tape at its cut-off, the same on every row
-    lt.model_id IS NOT NULL AS in_asset_index,
-    lt.tape_case_id AS asset_index_case_id,      -- the tape's case id: model_id, or previous_model_id
+    -- asset_index_: the seller's tape at its cut-off, the same on every row; empty where a deal's tape lacks it
+    lt.tape_case_id IS NOT NULL AS in_asset_index,
+    lt.match_method AS asset_index_match_method,  -- how the tape row was found: same_id, or moved_loan_old_case (the tape has the moved loan's old 1062 case)
+    lt.match_points AS asset_index_match_points,  -- points a borrower_and_balance pair scored
+    lt.tape_case_id AS asset_index_case_id,
+    a.sub_portfolio AS asset_index_sub_portfolio,
     a.cutoff_date AS asset_index_cutoff_date,
     a.currency AS asset_index_currency,
     a.principal_at_cutoff AS asset_index_principal_at_cutoff,
     a.legal_balance_at_cutoff AS asset_index_legal_balance_at_cutoff,
     a.accrued_interest_at_cutoff AS asset_index_accrued_interest_at_cutoff,
+    a.other_balances_at_cutoff AS asset_index_other_balances_at_cutoff,
+    a.default_date AS asset_index_default_date,
+    a.origination_date AS asset_index_origination_date,
     INITCAP(a.product_type) AS asset_index_product_type,
     p.birth_year AS asset_index_birth_year,
     p.deceased AS asset_index_deceased,
     p.gender AS asset_index_gender,
     x.bankruptcy_flag AS asset_index_bankruptcy_flag,
     x.debt_restructuring_flag AS asset_index_debt_restructuring_flag,
+    x.enforcement_flag AS asset_index_enforcement_flag,
+    x.legal_title_flag AS asset_index_legal_title_flag,
     x.postal_region AS asset_index_postal_region,
+    x.limitation_date AS asset_index_limitation_date,
+    x.verdict_date AS asset_index_verdict_date,
+    x.verdict_application_date AS asset_index_verdict_application_date,
 
     -- warehouse_: the deal, registration and default; the same on every row
     b.batch_bk AS warehouse_batch_bk,
@@ -562,7 +584,7 @@ SELECT
     -- warehouse_: collections in this month; read warehouse_reconciles_with_pam first
     COALESCE(k.collected_in_month, 0) AS warehouse_collected_in_month,
 
-    -- asset_index_: this month's payments in Intrum's benchmark file
+    -- asset_index_: this month's payments in the asset index
     COALESCE(ap.paid_in_month, 0) AS asset_index_paid_in_month,
 
     -- asset_index_vs_warehouse_: TRUE if both agree to the öre, empty if neither has a payment
@@ -606,4 +628,4 @@ LEFT JOIN cleaned_cases_collection AS k
 LEFT JOIN asset_index_payment AS ap
     ON ap.case_id = lt.tape_case_id
     AND ap.month_end = t.month_end
-ORDER BY 1, 6
+ORDER BY 1, 5

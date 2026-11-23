@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,6 +27,24 @@ WHERE _run_id = (
     QUALIFY ROW_NUMBER() OVER (ORDER BY approved_at DESC) = 1
 )
 """
+CASES_OWNED_SQL = """
+SELECT DISTINCT c.case_bk
+FROM prod.npl_common.fct_case_snapshot_daily AS s
+INNER JOIN prod.npl_common.dim_batch AS b
+    ON b.batch_sk = s.batch_sk
+INNER JOIN prod.npl_common.dim_case AS c
+    ON c.case_sk = s.case_sk
+WHERE b.servicer_parent_portfolio_bk = 'SE17039'
+"""
+
+
+def moved_pairs(cases_owned: set[str]) -> pd.DataFrame:
+    """The moved-loan pairs listed in accounts.sql where we own both cases, as accounts.sql uses them."""
+    text = (DATASET / "accounts.sql").read_text()
+    pairs = pd.DataFrame(
+        re.findall(r"\('(1062-\d+)', '(2080-\d+)'\)", text), columns=["old_case", "new_case"]
+    )
+    return pairs[pairs.old_case.isin(cases_owned) & pairs.new_case.isin(cases_owned)]
 
 
 def money(value) -> float | None:
@@ -63,13 +82,12 @@ def main() -> None:
     tape_ids = set(datalake.q(RUN_SQL, lower=True).case_id)
 
     loans = accounts.drop_duplicates("model_id")
-    # Every case we own: each loan's current case, plus the old case of a moved loan.
-    cases_owned = set(loans.model_id) | set(loans.previous_model_id.dropna())
-    moved = loans[loans.previous_model_id.notna()]
-    loan_of = {**{m: m for m in loans.model_id}, **dict(zip(moved.previous_model_id, moved.model_id))}
+    cases_owned = set(datalake.q(CASES_OWNED_SQL, lower=True).case_bk)
+    moved = moved_pairs(cases_owned)
+    loan_of = {**{m: m for m in loans.model_id}, **dict(zip(moved.old_case, moved.new_case))}
 
     cases_of_loan = {m: {m} for m in loans.model_id}
-    for old, new in zip(moved.previous_model_id, moved.model_id):
+    for old, new in zip(moved.old_case, moved.new_case):
         cases_of_loan[new].add(old)
 
     on_tape_direct = {c for c in cases_owned if c in tape_ids}

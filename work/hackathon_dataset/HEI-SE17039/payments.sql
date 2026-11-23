@@ -211,13 +211,10 @@ case_to_loan AS (
     SELECT
         o.case_bk,
         o.case_id_hashed,
-        COALESCE(m_old.new_case, o.case_bk) AS model_id,
-        COALESCE(m_old.old_case, m_new.old_case) AS previous_model_id
+        COALESCE(m_old.new_case, o.case_bk) AS model_id
     FROM cases_owned AS o
     LEFT JOIN migrated_cases AS m_old
         ON m_old.old_case = o.case_bk
-    LEFT JOIN migrated_cases AS m_new
-        ON m_new.new_case = o.case_bk
 ),
 
 -- When the loan first reached Intrum: the earlier of its cases' registration dates.
@@ -272,6 +269,8 @@ payment_before_registration AS (
         p.payment_amount AS amount,
         c.currency,
         p.case_id AS asset_index_case_id,
+        -- The tape has either the loan's own case or, for a moved loan, its old 1062 case.
+        IFF(p.case_id = l.model_id, 'same_id', 'moved_loan_old_case') AS asset_index_match_method,
         NULL AS warehouse_paid_on_case,
         NULL AS warehouse_collection_bk,
         NULL AS warehouse_batch_sk
@@ -297,6 +296,7 @@ payment_from_registration AS (
         f.amount,
         f.currency_id AS currency,
         NULL AS asset_index_case_id,
+        NULL AS asset_index_match_method,
         l.case_bk AS warehouse_paid_on_case,
         f.collection_bk AS warehouse_collection_bk,
         f.batch_sk AS warehouse_batch_sk
@@ -393,7 +393,6 @@ pam_reconciliation AS (
 SELECT
     -- Identifiers and the month; no prefix
     y.model_id,
-    l.previous_model_id,                        -- the old 1062 case, for a loan Intrum moved to 2080
     SPLIT_PART(y.model_id, '-', 1) AS instance,
     d.deal_id,
     d.intrum_id,
@@ -409,6 +408,7 @@ SELECT
 
     -- Source details; empty for the other source
     y.asset_index_case_id,
+    y.asset_index_match_method,                 -- same_id, or moved_loan_old_case
     y.warehouse_paid_on_case,
     b.batch_bk AS warehouse_batch_bk,
     y.warehouse_collection_bk,
@@ -425,8 +425,6 @@ SELECT
     ) AS warehouse_reconciles_with_pam
 FROM payment AS y
 CROSS JOIN pam_reconciliation AS p
-INNER JOIN (SELECT DISTINCT model_id, previous_model_id FROM case_to_loan) AS l
-    ON l.model_id = y.model_id
 LEFT JOIN loan_registration AS r
     ON r.model_id = y.model_id
 LEFT JOIN loan_batch AS d
