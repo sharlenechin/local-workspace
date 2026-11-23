@@ -1,60 +1,18 @@
--- SE17039 (SevenDay, HEI) accounts: one row per cleaned_cases per month-end.
---
--- COLUMN NAMES say where each value comes from: asset_index_ is the seller's tape as loaded into
--- the asset index, warehouse_ is Brocc's data warehouse, and warehouse_vs_pam_ compares the
--- warehouse with Intrum's own monthly report. Identifiers and the month have no prefix.
---
--- WHICH cleaned_casesS. Every cleaned_cases we own in this deal. A cleaned_cases counts as ours when the warehouse's
--- month-end balance table puts one of its Intrum cases in an SE17039 batch. Whether a cleaned_cases has
--- ever paid does not matter.
---
--- ONE cleaned_cases CAN HAVE TWO INTRUM CASES. Intrum moved 607 of these cleaned_casess from its system 1062 to its
--- system 2080: 268 in December 2022, 300 in May 2024 and 39 at other dates between February 2023
--- and March 2026. Each move opened a new case on 2080 and, the same day or the day after, closed
--- the old case on 1062 with closing code 9. The warehouse keeps both cases, and keeps reporting a
--- balance on the closed old case, so counting cases would count these cleaned_casess twice. Here each is
--- one cleaned_cases:
---   · model_id is the new case and previous_model_id the old one;
---   · each month is reported by the old case up to the month before the move, and by the new case
---     from the month of the move;
---   · collections are added up over both cases.
--- Intrum's data has no field linking the two cases, so the 607 pairs are listed below. A pair was
--- kept when the old case closed with code 9 within a day of the new case opening and either their
--- principal was equal on those dates (511 pairs) or their payments matched month by month to the
--- öre (338 pairs, 242 of them also equal on principal). Four pairs matched on payments only and
--- did not close that way, and are left out. Measured 20 November 2026; the working is in
--- bridge_check/.
---
--- WHICH MONTHS. Every month-end from the seller's tape cut-off (2 November 2017, so the first row
--- is 30 November 2017) to the latest month-end in the warehouse.
---   · Tape fields (balance at cut-off, product, birth year, flags) repeat on every row. They are
---     empty for cleaned_casess the seller's tape does not cover.
---   · Registration date, default date and balance at registration repeat on every row.
---     warehouse_balance_at_registration is the balance at the end of the registration month. It is filled
---     for 453 of the 455 cleaned_casess registered on system 2080 and never moved, and empty for every cleaned_cases
---     first registered on system 1062, because the warehouse has no balance for those cases from
---     that far back.
---   · Balance, status and closing are as at that month-end, from the warehouse. They are empty
---     before registration, and for cleaned_casess on system 1062 also until the warehouse's record of the
---     case starts, which is between March 2021 and October 2024.
---
--- COLLECTIONS. warehouse_collected_in_month comes from the warehouse's collections table. For this deal that
--- table holds nothing for system 1062 and about three quarters of what Intrum reported for system
--- 2080. Every row carries the deal-wide check against Intrum's own monthly report (PAM), built as
--- in payments.sql. Do not use warehouse_collected_in_month while warehouse_reconciles_with_pam is FALSE.
--- Payments after the last month-end row are not in this file (SEK 57,554.56 paid in November
--- 2026 at the time of measuring), so its total is that much below payments.sql.
---
--- Measured 20 November 2026: 2,095 cleaned_casess x 108 month-ends = 226,260 rows. 2,085 cleaned_casess are on
--- the seller's tape. Collections SEK 68,580,992.07, which is 50.90859% below PAM over December
--- 2018 to October 2026, so warehouse_reconciles_with_pam is FALSE on every row. Runs in about 5 minutes.
+-- SE17039 accounts: one row per loan per month-end, from the tape cut-off (Nov 2017) to the latest month.
+-- Column prefixes: asset_index_ = seller's tape, warehouse_ = our warehouse, warehouse_vs_pam_ = check against Intrum's report.
+-- A loan is ours if the warehouse puts one of its cases in an SE17039 batch.
+-- Intrum moved 607 loans from system 1062 to 2080, so each has two cases but is one loan here.
+-- For a moved loan, model_id is the new case and previous_model_id the old one.
+-- The 607 pairs are listed below; rebuild them with bridge_check/find_moved_loans.py.
+-- Warehouse payments are incomplete for this deal, so check warehouse_reconciles_with_pam before using them.
+-- Measured 20 Nov 2026: 2,095 loans, 226,260 rows, runs in about 5 minutes.
 
 SET portfolio_id = 'SE17039';
 SET max_total_deviation_pct = 10;
 SET min_month_coverage_pct = 80;
 
 WITH
--- Old case on 1062, new case on 2080, one pair per moved cleaned_cases.
+-- Old case on 1062, new case on 2080, one pair per moved loan.
 moved_cleaned_cases AS (
     SELECT
         column1 AS old_case,
@@ -214,8 +172,7 @@ moved_cleaned_cases AS (
         ('1062-6841959', '2080-2164219'), ('1062-6856535', '2080-2164570'), ('1062-6857800', '2080-1962125')
 ),
 
--- Every month-end row the warehouse holds for the deal's cases. A case's details can change over
--- time and each row points to the version current at that month-end, which gives the status then.
+-- Every month-end balance the warehouse holds for the deal's cases.
 monthly_cases AS (
     SELECT
         c.case_bk,
@@ -256,7 +213,7 @@ current_cases AS (
         AND case_bk IN (SELECT case_bk FROM cases_owned)
 ),
 
--- Only pairs where we own both cases; anything else stays a cleaned_cases of its own.
+-- Only pairs where we own both cases; anything else stays a loan of its own.
 migrated_cases AS (
     SELECT
         m.old_case,
@@ -268,7 +225,7 @@ migrated_cases AS (
     WHERE m.old_case IN (SELECT case_bk FROM cases_owned)
 ),
 
--- Which case reports for each cleaned_cases, and over which months.
+-- Which case reports for each loan, and over which months.
 cases_period AS (
     SELECT
         case_bk AS model_id,
@@ -301,8 +258,7 @@ cases_period AS (
     FROM migrated_cases
 ),
 
--- One row per cleaned_cases. For a moved cleaned_cases, registration and default come from the earlier of its two
--- cases, which is when the cleaned_cases first reached Intrum.
+-- One row per loan; a moved loan takes its registration and default dates from its old case.
 cleaned_cases AS (
     SELECT
         l.model_id,
@@ -315,15 +271,13 @@ cleaned_cases AS (
     GROUP BY 1
 ),
 
--- The batch, and so the deal name, of the case reporting today.
+-- Each loan's deal and batch, from the case reporting today.
 cleaned_cases_batch AS (
     SELECT
         l.model_id,
         IFF(
             b.deal_source_bk = 'HEI' OR dl.deal_bk IS NULL,
-            -- Heimdall is one Atlas deal (HEI-SE25001) over 2,612 Intrum books, so its books are
-            -- named vehicle-Intrum id. Every other vehicle has its own Atlas deal, whose id already
-            -- reads vehicle-Atlas id (LOK-SE25008 is the book Intrum calls SE25018).
+            -- Heimdall books are named vehicle-Intrum id; other deals use their Atlas id.
             b.deal_source_bk || '-' || b.servicer_parent_portfolio_bk,
             dl.deal_bk
         ) AS deal_id,
@@ -335,7 +289,7 @@ cleaned_cases_batch AS (
         ON o.case_bk = l.case_bk
     INNER JOIN prod.npl_common.dim_batch AS b
         ON b.batch_sk = o.batch_sk
-    -- Kept as a left join: a batch whose portfolio the warehouse does not know would otherwise vanish.
+    -- Left join, so a batch with an unknown portfolio is not dropped.
     LEFT JOIN prod.npl_common.dim_portfolio AS pf
         ON pf.portfolio_sk = b.portfolio_sk
     LEFT JOIN prod.npl_common.dim_deal AS dl
@@ -381,7 +335,7 @@ asset_index_counterparty AS (
     GROUP BY 1
 ),
 
--- Filled only for cleaned_casess on the seller's DS tape; empty means not on that tape, not false.
+-- Tape flags; empty means the loan is not on the seller's DS tape.
 asset_index_attribute AS (
     SELECT
         a.entity_id AS case_id,
@@ -395,7 +349,7 @@ asset_index_attribute AS (
     GROUP BY 1
 ),
 
--- The tape row for each cleaned_cases: under its current case id, or its old one if that is what the tape used.
+-- Each loan's tape row, under its current case id or its old one.
 cleaned_cases_tape AS (
     SELECT
         l.model_id,
@@ -421,7 +375,7 @@ month_base_reference AS (
     WHERE month_end <= (SELECT MAX(month_end) FROM monthly_cases)
 ),
 
--- Each cleaned_cases's month-end figures, from whichever case reports for it that month.
+-- Each loan's month-end figures, from whichever case reports for it that month.
 monthly_cleaned_cases AS (
     SELECT
         l.model_id,
@@ -444,7 +398,7 @@ monthly_cleaned_cases AS (
         ON v.case_sk = d.case_sk
 ),
 
--- Balance in the month the cleaned_cases was registered, where the warehouse has that month.
+-- Balance at the end of the registration month, if the warehouse has that month.
 registration_balance AS (
     SELECT
         m.model_id,
@@ -456,7 +410,7 @@ registration_balance AS (
     WHERE m.month_end = LAST_DAY(l.registration_date)
 ),
 
--- Collections per cleaned_cases and month, over both cases of a moved cleaned_cases.
+-- Collections per loan and month, over both cases of a moved loan.
 cleaned_cases_collection AS (
     SELECT
         l.model_id,
@@ -468,6 +422,18 @@ cleaned_cases_collection AS (
     INNER JOIN prod.npl_common.fct_case_collection AS f
         ON f.case_id = o.case_id_hashed
     GROUP BY 1, 2
+),
+
+-- Asset-index payments (from Intrum's benchmark file) per tape case and month.
+asset_index_payment AS (
+    SELECT
+        p.case_id,
+        LAST_DAY(p.payment_date) AS month_end,
+        SUM(p.payment_amount) AS paid_in_month
+    FROM asset_index.approved.payments AS p
+    INNER JOIN asset_index_latest_run AS r
+        ON r.run_id = p._run_id
+    GROUP BY p.case_id, LAST_DAY(p.payment_date)
 ),
 
 deal_batch AS (
@@ -520,7 +486,7 @@ warehouse_monthly AS (
     GROUP BY 1
 ),
 
--- Both sides stop at whichever source ends first, so neither is short only for being older.
+-- Compare only the months both sources cover.
 base_pam_reconciliation AS (
     SELECT
         p.collection_month,
@@ -536,8 +502,7 @@ pam_reconciliation AS (
     SELECT
         SUM(pam_collected) AS pam_collected,
         SUM(warehouse_collected) AS warehouse_collected,
-        -- Percentages: the warehouse's total above (+) or below (-) PAM's, and the share of PAM's
-        -- cash months in which the warehouse has cash too.
+        -- Warehouse total vs PAM in %, and the share of PAM's paying months the warehouse also has.
         (SUM(warehouse_collected) / NULLIF(SUM(pam_collected), 0) - 1) * 100
             AS collection_reconciliation_total_pct,
         COUNT_IF(pam_collected <> 0 AND warehouse_collected <> 0)
@@ -550,15 +515,16 @@ pam_reconciliation AS (
 SELECT
     -- Identifiers and the month; no prefix
     l.model_id,
-    l.previous_model_id,                        -- the old 1062 case, for a cleaned_cases Intrum moved to 2080
+    l.previous_model_id,                        -- the old 1062 case, for a loan Intrum moved to 2080
     SPLIT_PART(l.model_id, '-', 1) AS instance,
     b.deal_id,
     b.intrum_id,
     t.month_end,
     DATEDIFF(MONTH, l.registration_date, t.month_end) AS months_since_registration,  -- negative before
 
-    -- asset_index_: the seller's tape, as at its cut-off; the same on every row
+    -- asset_index_: the seller's tape at its cut-off, the same on every row
     lt.model_id IS NOT NULL AS in_asset_index,
+    lt.tape_case_id AS asset_index_case_id,      -- the tape's case id: model_id, or previous_model_id
     a.cutoff_date AS asset_index_cutoff_date,
     a.currency AS asset_index_currency,
     a.principal_at_cutoff AS asset_index_principal_at_cutoff,
@@ -596,8 +562,19 @@ SELECT
     -- warehouse_: collections in this month; read warehouse_reconciles_with_pam first
     COALESCE(k.collected_in_month, 0) AS warehouse_collected_in_month,
 
-    -- warehouse_vs_pam_: the warehouse's collections checked against Intrum's own monthly report,
-    -- for the whole deal; the same on every row
+    -- asset_index_: this month's payments in Intrum's benchmark file
+    COALESCE(ap.paid_in_month, 0) AS asset_index_paid_in_month,
+
+    -- asset_index_vs_warehouse_: TRUE if both agree to the öre, empty if neither has a payment
+    COALESCE(ap.paid_in_month, 0) - COALESCE(k.collected_in_month, 0)
+        AS asset_index_vs_warehouse_paid_difference,
+    IFF(
+        ap.paid_in_month IS NULL AND k.collected_in_month IS NULL,
+        NULL,
+        ABS(COALESCE(ap.paid_in_month, 0) - COALESCE(k.collected_in_month, 0)) < 0.01
+    ) AS asset_index_vs_warehouse_paid_matches,
+
+    -- warehouse_vs_pam_: deal-wide check of warehouse payments against Intrum's monthly report
     ROUND(q.collection_reconciliation_total_pct, 5) AS warehouse_vs_pam_collection_total_pct,
     ROUND(q.collection_month_coverage_pct, 5) AS warehouse_vs_pam_month_coverage_pct,
     COALESCE(
@@ -626,4 +603,7 @@ LEFT JOIN monthly_cleaned_cases AS m
 LEFT JOIN cleaned_cases_collection AS k
     ON k.model_id = l.model_id
     AND k.month_end = t.month_end
+LEFT JOIN asset_index_payment AS ap
+    ON ap.case_id = lt.tape_case_id
+    AND ap.month_end = t.month_end
 ORDER BY 1, 6

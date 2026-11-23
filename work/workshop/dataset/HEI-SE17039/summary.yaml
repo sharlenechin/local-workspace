@@ -1,0 +1,82 @@
+deal: HEI-SE17039
+measured_on: '2026-11-23'
+source_of_numbers: 'live queries against prod: accounts.sql, payments.sql, summary/summary_sources.sql'
+ownership:
+  cases_owned_in_npl_common: 2702
+  cases_owned_by_system:
+    '1062': 1640
+    '2080': 1062
+  loans_owned: 2095
+  loans_moved_from_1062_to_2080: 607
+  note: A moved loan has two cases, so cases_owned = loans_owned + loans_moved.
+payments_since_purchase:
+  months: 2018-12 to 2026-10
+  currency: SEK
+  npl_common_portfolio_snapshot:
+    scope: whole deal; FCT_PORTFOLIO_SNAPSHOT_MONTHLY.GROSS_CASH_RECOVERIES, built from PAM
+    paid: 141558830.74
+    months_with_payments: 95
+  npl_common_case_collection:
+    scope: whole deal; FCT_CASE_COLLECTION, built from CAT
+    paid: 68580992.07
+    vs_portfolio_snapshot_pct: -51.55301
+    months_with_payments: 95
+    cases_with_payments: 785
+  asset_index:
+    scope: loans on Intrum's benchmark file only; asset_index.approved.payments
+    paid: 137241748.89
+    vs_portfolio_snapshot_pct: -3.04967
+    months_with_payments: 95
+    cases_with_payments: 1679
+  note: vs_portfolio_snapshot_pct is the source's total above (+) or below (-) the portfolio snapshot's,
+    which is built from Intrum's own monthly report.
+bridge_tape_to_cases_owned:
+  denominator: cases owned in npl_common
+  cases_owned: 2702
+  via_case_bk:
+    cases: 2085
+    pct: 77.16506
+    how: the tape's case id equals the warehouse case id (DIM_CASE.CASE_BK)
+  via_moved_loan_link:
+    cases: 607
+    pct: 22.46484
+    how: old 1062 case of a moved loan whose new 2080 case is on the tape
+  via_payment_history:
+    cases: 0
+    pct: 0.0
+    how: not used in the queries. Matching leftover cases on months with equal payments found 1 possible
+      pair, too weak to use; see bridge_check/.
+  bridged_total:
+    cases: 2692
+    pct: 99.6299
+  not_bridged:
+    cases: 10
+    pct: 0.3701
+    by_system:
+      '1062': 4
+      '2080': 6
+  tape_cases_not_owned:
+    cases: 420
+    note: on the tape but not a case we own in the warehouse
+  loans_on_tape:
+    loans: 2085
+    of_loans_owned: 2095
+    pct: 99.52267
+monthly_payments_asset_index_vs_warehouse:
+  what: loan-months where either source has a payment; matched = equal to the öre
+  loan_months_with_a_payment: 47879
+  matched: 13627
+  matched_pct: 28.46133
+  by_system_of_current_case:
+    '1062':
+      loan_months: 13794
+      matched: 0
+      matched_pct: 0.0
+    '2080':
+      loan_months: 34085
+      matched: 13627
+      matched_pct: 39.97946
+dataset_rows:
+  accounts_sql: 226260
+  payments_sql: 36047
+  payments_sql_amount: 68638546.63
