@@ -1,0 +1,55 @@
+measured_on: '2026-11-24'
+source_of_numbers: 'live queries: each deal''s accounts.sql and payments_pre_registration.sql on prod,
+  payments_post_registration.sql on the sandbox build DEV.HACKATHON (connection dev)'
+currency: SEK
+all_deals:
+  deals:
+  - HEI-SE17039
+  - HEI-SE20009
+  loans: 17609
+  accounts_rows: 1482894
+  payments_rows: 423604
+  payments_by_source:
+    asset_index:
+      rows: 69527
+      amount_sek: 119077153.05
+    warehouse:
+      rows: 354077
+      amount_sek: 439970092.77
+by_deal:
+  HEI-SE17039:
+    loans: 2095
+    loans_with_a_tape_row: 2085
+    loans_with_a_tape_row_pct: 99.52267
+    accounts_rows: 226260
+    payments_rows: 134878
+    payments_by_source:
+      asset_index:
+        rows: 37367
+        amount_sek: 73912830.53
+      warehouse:
+        rows: 97511
+        amount_sek: 159307063.04
+    warehouse_vs_pam:
+      months: 2018-12 to 2026-10
+      share_of_pam_pct: 93.94146
+      month_coverage_pct: 100.0
+      reconciles: true
+  HEI-SE20009:
+    loans: 15514
+    loans_with_a_tape_row: 13587
+    loans_with_a_tape_row_pct: 87.57896
+    accounts_rows: 1256634
+    payments_rows: 288726
+    payments_by_source:
+      asset_index:
+        rows: 32160
+        amount_sek: 45164322.52
+      warehouse:
+        rows: 256566
+        amount_sek: 280663029.73
+    warehouse_vs_pam:
+      months: 2020-07 to 2026-10
+      share_of_pam_pct: 97.81675
+      month_coverage_pct: 100.0
+      reconciles: true
