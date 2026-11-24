@@ -126,12 +126,14 @@ def render(s: dict) -> str:
     if "payments_before_registration" in s:
         v = s["payments_before_registration"]
         out += [
-            "## Payments before registration",
+            f"## {v.get('title', 'Payments before registration')}",
             "",
-            f"{v['what'].capitalize()}: SEK {_sek(v['paid'])} on {_n(v['cases_with_payments'])} cases, "
+            f"{v['what'][:1].upper() + v['what'][1:]}: SEK {_sek(v['paid'])} on {_n(v['cases_with_payments'])} cases, "
             f"{v['first']} to {v['last']}.",
             "",
         ]
+        if v.get("note"):
+            out += [v["note"], ""]
 
     if "monthly_payments_asset_index_vs_warehouse" in s:
         v = s["monthly_payments_asset_index_vs_warehouse"]

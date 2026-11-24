@@ -7,7 +7,9 @@ Measured 2026-11-24 from live queries: each deal's accounts.sql and payments_pre
 | Deal | Loans | Loans in the Asset Index | Warehouse vs PAM | Months with payments | Reconciles |
 |---|---:|---:|---:|---:|---|
 | HEI-SE17039 | 2,095 | 2,085 (99.5227%) | **93.9415%** (2018-12 to 2026-10) | 100% | **Yes** |
+| HEI-SE19026 | 9,574 | 9,292 (97.0545%) | **97.2124%** (2019-12 to 2026-10) | 100% | **Yes** |
 | HEI-SE20009 | 15,514 | 13,587 (87.579%) | **97.8167%** (2020-07 to 2026-10) | 100% | **Yes** |
+| LOK-SE25008 | 9,755 | 9,692 (99.3542%) | **97.2787%** (2025-06 to 2026-10) | 100% | **Yes** |
 
 Warehouse vs PAM is the warehouse's total as a share of Intrum's monthly report (PAM), from purchase to PAM's last complete month. A deal reconciles when that is within 10% and the warehouse has payments in at least 80% of PAM's months.
 
@@ -15,19 +17,34 @@ Warehouse vs PAM is the warehouse's total as a share of Intrum's monthly report 
 
 ![Payments by month, one row per deal](payments_by_month.png)
 
-Bars are the Asset Index (seller tape) payments before each loan's registration month; lines are from the registration month on. The dashed line is the registration date of most loans (the month most registered).
+Bars are the Asset Index (seller tape) payments before each loan's registration month; lines are from the registration month on. The dashed line is the month the most loans registered with Intrum.
 
-Why HEI-SE17039 has warehouse payments before its registration date: Intrum was already collecting these loans for the seller before we bought the deal, and each loan registered with Intrum when it went to collection, from 2008 to 2018. Only 448 of the 2,095 loans registered in Dec 2018, the purchase month. Each loan switches from Asset Index to warehouse in its own registration month, so before 2019 the bars are loans not yet with Intrum and the line is loans already with Intrum: different loans, never the same payment twice. The current month is left out of the lines.
+**LOK-SE25008 is split at Intrum's acquisition month (Jun 2025), not by registration.** Intrum was already collecting its loans for the seller from 2016, and its tape is that collection history (it matches the warehouse to the öre on 97.9% of loan-months). Split by registration, almost all of it would have been replaced by the warehouse. So the tape is used up to the purchase and the warehouse from it, and the dashed line on its chart marks the acquisition month.
+
+Why some deals have warehouse payments before the dashed line: Intrum was already collecting part of the deal for the seller before we bought it, and each loan registered with Intrum when it went to collection. Each loan switches from Asset Index to warehouse in its own registration month, so where bars and line overlap they are different loans, never the same payment twice. The current month is left out of the lines.
+
+| Deal | Bought | Loans registered with Intrum before we bought | First registration |
+|---|---|---:|---|
+| HEI-SE17039 | Dec 2018 | 1,640 of 2,095 (78.282%) | Nov 2008 |
+| HEI-SE19026 | Dec 2019 | 1,094 of 9,574 (11.427%) | Mar 2019 |
+| HEI-SE20009 | Jul 2020 | 0 of 15,514 (0%) | Jul 2020 |
+| LOK-SE25008 | Jun 2025 | 9,712 of 9,755 (99.559%) | Dec 2016 |
 
 ## Rows and totals
 
-17,609 loans; 1,482,894 rows in accounts, 423,604 in payments (output/, .csv and .parquet).
+The split is each loan's registration month, except LOK-SE25008 (Intrum's acquisition month).
+
+36,938 loans; 2,482,391 rows in accounts, 744,686 in payments (output/, .csv and .parquet).
 
 | Deal | Source | Rows | Amount (SEK) |
 |---|---|---:|---:|
-| HEI-SE17039 | Asset Index, before registration month | 37,367 | 73,912,830.53 |
-| HEI-SE17039 | warehouse, from registration month | 97,511 | 159,307,063.04 |
-| HEI-SE20009 | Asset Index, before registration month | 32,160 | 45,164,322.52 |
-| HEI-SE20009 | warehouse, from registration month | 256,566 | 280,663,029.73 |
-| **All deals** | Asset Index, before registration month | 69,527 | 119,077,153.05 |
-| **All deals** | warehouse, from registration month | 354,077 | 439,970,092.77 |
+| HEI-SE17039 | Asset Index, before the split | 37,367 | 73,912,830.53 |
+| HEI-SE17039 | warehouse, from the split | 97,511 | 159,307,063.04 |
+| HEI-SE19026 | Asset Index, before the split | 13,627 | 21,373,412.56 |
+| HEI-SE19026 | warehouse, from the split | 162,574 | 141,824,644.67 |
+| HEI-SE20009 | Asset Index, before the split | 32,160 | 45,164,322.52 |
+| HEI-SE20009 | warehouse, from the split | 256,566 | 280,663,029.73 |
+| LOK-SE25008 | Asset Index, before the split | 95,461 | 119,363,157.59 |
+| LOK-SE25008 | warehouse, from the split | 49,420 | 46,387,850.37 |
+| **All deals** | Asset Index, before the split | 178,615 | 259,813,723.20 |
+| **All deals** | warehouse, from the split | 566,071 | 628,182,587.81 |

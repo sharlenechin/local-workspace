@@ -21,7 +21,7 @@ import pandas as pd
 HERE = Path(__file__).parent
 DEALS_DIR = HERE.parent / "individual_deal_dataset"
 OUTPUT = HERE / "output"
-DEALS = ["HEI-SE17039", "HEI-SE20009"]
+DEALS = ["HEI-SE17039", "HEI-SE19026", "HEI-SE20009", "LOK-SE25008"]
 
 sys.path.insert(0, str(DEALS_DIR))
 import deal_dataset  # noqa: E402
@@ -46,6 +46,15 @@ def deal_report(accounts: pd.DataFrame, payments: pd.DataFrame) -> dict:
         "accounts_rows": len(accounts),
         "payments_rows": len(payments),
         "payments_by_source": by_source(payments),
+        # Loans Intrum held for the seller before we bought: their warehouse payments start before the dashed line.
+        "loans_registered_before_purchase": int(
+            (
+                loans.warehouse_registration_date
+                < pd.Timestamp(warehouse.warehouse_vs_pam_compared_from).to_period("M").to_timestamp()
+            ).sum()
+        ),
+        "registered_from": f"{loans.warehouse_registration_date.min():%b %Y}",
+        "purchase_month": f"{warehouse.warehouse_vs_pam_compared_from:%b %Y}",
         "warehouse_vs_pam": {
             "months": f"{warehouse.warehouse_vs_pam_compared_from:%Y-%m} to "
             f"{warehouse.warehouse_vs_pam_compared_to:%Y-%m}",
@@ -81,8 +90,15 @@ def render(summary: dict) -> str:
     totals = ["| Deal | Source | Rows | Amount (SEK) |", "|---|---|---:|---:|"]
     for deal, d in [*deals.items(), ("**All deals**", summary["all_deals"])]:
         for source, v in d["payments_by_source"].items():
-            name = "Asset Index, before registration month" if source == "asset_index" else "warehouse, from registration month"
+            name = "Asset Index, before the split" if source == "asset_index" else "warehouse, from the split"
             totals.append(f"| {deal} | {name} | {_n(v['rows'])} | {_sek(v['amount_sek'])} |")
+    registered_early = ["| Deal | Bought | Loans registered with Intrum before we bought | First registration |", "|---|---|---:|---|"]
+    for deal, d in deals.items():
+        share = d["loans_registered_before_purchase"] / d["loans"] * 100
+        registered_early.append(
+            f"| {deal} | {d['purchase_month']} | {_n(d['loans_registered_before_purchase'])} of {_n(d['loans'])} "
+            f"({share:.5g}%) | {d['registered_from']} |"
+        )
     a = summary["all_deals"]
     return "\n".join(
         [
@@ -103,16 +119,25 @@ def render(summary: dict) -> str:
             "![Payments by month, one row per deal](payments_by_month.png)",
             "",
             "Bars are the Asset Index (seller tape) payments before each loan's registration month; lines are from the registration "
-            "month on. The dashed line is the registration date of most loans (the month most registered).",
+            "month on. The dashed line is the month the most loans registered with Intrum.",
             "",
-            "Why HEI-SE17039 has warehouse payments before its registration date: Intrum was already collecting "
-            "these loans for the seller before we bought the deal, and each loan registered with Intrum when it "
-            "went to collection, from 2008 to 2018. Only 448 of the 2,095 loans registered in Dec 2018, the "
-            "purchase month. Each loan switches from Asset Index to warehouse in its own registration month, so before "
-            "2019 the bars are loans not yet with Intrum and the line is loans already with Intrum: different "
-            "loans, never the same payment twice. The current month is left out of the lines.",
+            "**LOK-SE25008 is split at Intrum's acquisition month (Jun 2025), not by registration.** Intrum was "
+            "already collecting its loans for the seller from 2016, and its tape is that collection history (it matches "
+            "the warehouse to the öre on 97.9% of loan-months). Split by registration, almost all of it would have "
+            "been replaced by the warehouse. So the tape is used up to the purchase and the warehouse from it, and the "
+            "dashed line on its chart marks the acquisition month.",
+            "",
+            "Why some deals have warehouse payments before the dashed line: Intrum was already collecting part "
+            "of the deal for the seller before we bought it, and each loan registered with Intrum when it went to "
+            "collection. Each loan switches from Asset Index to warehouse in its own registration month, so where "
+            "bars and line overlap they are different loans, never the same payment twice. The current month is "
+            "left out of the lines.",
+            "",
+            *registered_early,
             "",
             "## Rows and totals",
+            "",
+            "The split is each loan's registration month, except LOK-SE25008 (Intrum's acquisition month).",
             "",
             f"{_n(a['loans'])} loans; {_n(a['accounts_rows'])} rows in accounts, {_n(a['payments_rows'])} in payments "
             "(output/, .csv and .parquet).",

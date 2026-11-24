@@ -38,8 +38,18 @@ has the step-by-step of what each pending change would move.
 ⚠ **Sweden is the exception (2026-11-24).** Its two collection bugs (dropped
 1062 payments, double-counted 2080 payments) are fixed in the sandbox build
 `DEV.HACKATHON`, branch `hackathon-test`, which is **not merged**. Swedish
-post-registration payments come from there; the query-helper agent has the
-table names and traps.
+post-registration payments come from there:
+- Connect with `datalake.q(..., connection="dev", warehouse="DEV_WH")`.
+- Its tables carry an `npl_` prefix (`fct_npl_case_collection`, `dim_npl_case`,
+  `fct_npl_portfolio_snapshot_monthly`).
+- Drop `is_before_acquisition` rows, and compare against PAM's
+  `gross_cash_recoveries_unlevelled`.
+- Loans, balances and the asset index still come from PROD; the sandbox has
+  none of the prod asset-index runs.
+
+The rest of its traps are in `.claude/agents/query-helper.md`, section
+"Sweden, Intrum ids and the hackathon build". Quote any figure from it as "on
+the sandbox build", never as PROD.
 
 ⚠ **Three steps stay on RAW whatever lands.** Borrower type — PROD's
 `BORROWER_BK` is collapsed, one key shared by **24,559,290 cases**, and nothing
@@ -49,7 +59,7 @@ feed lag — `NPL_COMMON` inherits it, so recent months still come from PAM.
 | `work/project-elsa-benchmark/FINDINGS.md` | **the worked example** — Portugal/Millennium, every figure measured |
 | `work/project-sea-benchmark/` | **the second book** — PT / **five originators**, one-off batches only. REBUILT 2026-10-01; the four `.sql` files are the current best adaptation of the templates and the only ones carrying step 8. `project_sea_benchmark_README.md` carries the caveats |
 | `work/.archive/2026-10-02-benchmark-investigation-trail/` | the eighteen investigation files from that build. **Moved out of `work/benchmark-dataset/post-registration-benchmark/` on 2026-10-02** — it is an audit trail, not working material. Open one only for the *working*, never the answer. Its two CSVs are an old schema; never quote them |
-| `work/hackathon_dataset/` | **the Swedish books** (HEI-SE17039, HEI-SE20009): asset index before registration, warehouse after, one deal per folder, stacked by `final_dataset/final_dataset.py`. `README.md` is the map. The recipe is below in **Books that start in the asset index** |
+| `work/hackathon_dataset/` | **the Swedish books** (HEI-SE17039, HEI-SE19026, HEI-SE20009, LOK-SE25008): asset index before registration, warehouse after, one deal per folder, stacked by `final_dataset/final_dataset.py`. `README.md` is the map. The recipe is below in **Books that start in the asset index** |
 | `work/portugal/` | the Portuguese seller census — who sold what, before a book is picked. ⚠ Two different cuts, not a file and its subset |
 | `work/italy/` | the two Italian books: legal phases, and settlement rates by age. ⚠ Their two servicers must never be added together |
 | `work/data-issues/intrum/escalations-portugal-millennium.md` | what a finished escalation write-up looks like |
@@ -227,6 +237,8 @@ into 01/02/03, and you say so.
   name its guards cannot be defended.
 - **The warehouse is not a shortcut here.** Collections in `NPL_COMMON` are
   truncated and there is no undated cash in it at all — see the note above.
+  The exception is Sweden, where the sandbox build `DEV.HACKATHON` is the source
+  for payments after registration.
 
 **What a good scope answer looks like:** *"61 batches you can use, EUR 401.8m
 of lifetime collections, all in Intrum instance 4050. I dropped 198 batches —
@@ -416,6 +428,10 @@ benchmark. Measured:
 
 Use it for portfolio, batch, vehicle and country dimensions — that it does well.
 
+⚠ **Sweden:** collections come from the sandbox build `DEV.HACKATHON`, not
+PROD. Its fixes are measured there: HEI-SE17039 reaches 93.94% of PAM against
+48.45% on PROD. The rest of this table still applies.
+
 ## ⚠⚠ THE MONEY COLUMN: TREAT `ORIGINAL_CAPITAL` AS AN INFERENCE
 
 `CASES.ORIGINAL_CAPITAL` is what the templates call `registration_capital` —
@@ -507,6 +523,12 @@ result looked like.
   shipping. A loan registered years before purchase (most of HEI-SE17039) has
   warehouse payments before the deal's purchase date. That is correct: they are
   different loans from the asset-index ones.
+  ⚠ **Exception: when the tape IS the servicer's own history, split at the
+  acquisition month instead.** Check by comparing the tape with the warehouse
+  for the same loan-months after registration. On LOK-SE25008 they matched to
+  the öre on 97.9%, so a registration split would have kept 46 of 95,438 tape
+  payments. That deal splits at Intrum's acquisition month (Jun 2025). Say which
+  split a deal uses in its query headers and summary.
 - **The union contract:** every deal emits the same columns in the same order.
   The pre and post payment queries share one column list. A column a deal can't
   fill is `NULL`, never dropped. A new deal copies the final `SELECT`s from an
@@ -855,12 +877,13 @@ user asks for a change in that place, in those words, in that message:
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
 | `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
+| `DEV.HACKATHON` on **brocc-sandbox** | the dbt build with Sweden's two collection fixes | **read only** — it's a dbt build, so a rebuild comes from `brocc-data`, never from a query here |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**
 PROD refuses a write — the role holds `SELECT` and `USAGE` only, so a mistake
 there fails loudly. The sandbox does not refuse: the `DEVELOPER` role carries
-write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX`
-**succeeds silently** and changes data someone else depends on. Never issue DDL
+write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX` or
+`DEV.HACKATHON` **succeeds silently** and changes data someone else depends on. Never issue DDL
 or DML there as a step toward something else.
 
 **"Explicitly stated" means the user named the target and the change.** A task

@@ -18,12 +18,13 @@ user asks for a change in that place, in those words, in that message:
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
 | `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
+| `DEV.HACKATHON` on **brocc-sandbox** | the dbt build with Sweden's two collection fixes | **read only** — it's a dbt build, so a rebuild comes from `brocc-data`, never from a query here |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**
 PROD refuses a write — the role holds `SELECT` and `USAGE` only, so a mistake
 there fails loudly. The sandbox does not refuse: the `DEVELOPER` role carries
-write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX`
-**succeeds silently** and changes data someone else depends on. Never issue DDL
+write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX` or
+`DEV.HACKATHON` **succeeds silently** and changes data someone else depends on. Never issue DDL
 or DML there as a step toward something else.
 
 **"Explicitly stated" means the user named the target and the change.** A task

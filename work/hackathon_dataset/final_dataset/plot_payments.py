@@ -5,7 +5,7 @@
 Bars are the Asset Index payments before registration, from output/ (final_dataset.py writes it, then calls this).
 Lines: this dataset's warehouse payments (sandbox build), prod's case payments today, and Intrum's PAM for the
 whole deal (sandbox build). Each loan switches from Asset Index to warehouse in its own registration month; the dashed
-line marks the month most loans registered.
+line marks the month most loans registered. LOK-SE25008 switches at Intrum's acquisition month instead.
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ import pandas as pd  # noqa: E402
 HERE = Path(__file__).parent
 IMAGE = HERE / "payments_by_month.png"
 SANDBOX = {"connection": "dev", "warehouse": "DEV_WH"}
+# Deals whose payments switch from Asset Index to warehouse at Intrum's acquisition month, not each loan's
+# registration month: their tape is Intrum's own collection history from before the purchase.
+SPLIT_AT_ACQUISITION = {"LOK-SE25008"}
 
 INK = "#1f2a2e"
 MUTED = "#6b7a80"
@@ -38,8 +41,9 @@ def monthly(series: pd.Series, dates: pd.Series) -> pd.Series:
 
 
 def draw(ax, deal: str, payments: pd.DataFrame, accounts: pd.DataFrame) -> None:
-    intrum_id = deal.split("-", 1)[1]
     p = payments[payments.deal_id == deal]
+    # Intrum's id, not the deal name: LOK-SE25008 is SE25018 at Intrum.
+    intrum_id = p.intrum_id.dropna().iloc[0]
     current_month = pd.Timestamp.today().to_period("M").to_timestamp()
 
     tape = p[p.payment_source == "asset_index"]
@@ -52,10 +56,15 @@ def draw(ax, deal: str, payments: pd.DataFrame, accounts: pd.DataFrame) -> None:
     loans = accounts[accounts.deal_id == deal].drop_duplicates("model_id").warehouse_registration_date.dt.to_period("M")
     busiest = loans.value_counts()
     registered = busiest.index[0].to_timestamp()
+    label = "Registration Date"
+    if deal in SPLIT_AT_ACQUISITION:
+        # The whole deal switches at the acquisition month, so the line marks that instead.
+        acquired = p.warehouse_vs_pam_compared_from.dropna().iloc[0]
+        registered, label = pd.Timestamp(acquired).to_period("M").to_timestamp(), "Acquisition Date"
 
     # Bars sit on the month they belong to, about a month wide with a thin gap.
     ax.bar(tape_m.index - pd.to_timedelta(14, unit="D"), tape_m.values, width=26, color=TAPE,
-           label="Asset Index, before registration")
+           label="Asset Index, before registration (LOK-SE25008: before acquisition)")
     ax.plot(pam.month_end, pam.pam / 1e6, color=PAM, linewidth=3, label="PAM, whole deal (sandbox build)")
     ax.plot(warehouse_m.index, warehouse_m.values, color=WAREHOUSE, linewidth=1.5,
             label="Warehouse, this dataset (sandbox build, both fixes)")
@@ -66,7 +75,12 @@ def draw(ax, deal: str, payments: pd.DataFrame, accounts: pd.DataFrame) -> None:
     # Headroom above the tallest series, so the label never sits on a bar or a line.
     top = max(tape_m.max(), warehouse_m.max(), pam.pam.max() / 1e6, prod.collected.max() / 1e6)
     ax.set_ylim(0, top * 1.22)
-    ax.text(registered, 0.985, f" Registration Date: {registered:%b %Y}", transform=ax.get_xaxis_transform(),
+    # Start a little before the first non-zero payment from any source, so a zero-value row can't stretch
+    # the axis. HEI-SE20009's really does start in 2008: its tape has small seller payments from Aug 2008.
+    firsts = [s[s > 0].index.min() for s in (tape_m, warehouse_m) if (s > 0).any()]
+    firsts += [d.month_end[d[c] > 0].min() for d, c in ((pam, "pam"), (prod, "collected")) if (d[c] > 0).any()]
+    ax.set_xlim(left=pd.Timestamp(min(firsts)) - pd.DateOffset(months=6))
+    ax.text(registered, 0.985, f" {label}: {registered:%b %Y}", transform=ax.get_xaxis_transform(),
             va="top", ha="left", color=INK, fontsize=9,
             bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5})
 
@@ -94,7 +108,8 @@ def main(deals: list[str] | None = None) -> Path:
         draw(ax, deal, payments, accounts)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, fontsize=9, labelcolor=INK)
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    # Keep about half an inch at the top for the legend, however many deals there are.
+    fig.tight_layout(rect=(0, 0, 1, 1 - 0.5 / fig.get_figheight()))
     fig.savefig(IMAGE, dpi=150, facecolor="white")
     print(f"wrote {IMAGE}")
     return IMAGE

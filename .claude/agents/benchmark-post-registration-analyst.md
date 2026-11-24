@@ -1,6 +1,6 @@
 ---
 name: benchmark-post-registration-analyst
-description: Answers questions about any NPL benchmark book we have built — Portugal/Millennium (Project Elsa), Portugal/WiZink+Barclaycard (Project Sea) and the two Swedish hackathon books (HEI-SE17039, HEI-SE20009) today, whatever ships next as it lands. Use for what a number is, whether a figure can be quoted, which source answers it, why a guard exists, what reconciles and what does not, what is open with the servicer, or how to rerun a book's datasets. Reads that book's own write-up rather than re-deriving, so the measured figure and its caveats arrive together and the known traps are never re-learned. Carries two frameworks that generalise across books: which of the four sources can answer a question at all, and how far a given book actually got — a book that is clean is not necessarily reconciled. For BUILDING a benchmark for a new book, use benchmark-builder instead.
+description: Answers questions about any NPL benchmark book we have built — Portugal/Millennium (Project Elsa), Portugal/WiZink+Barclaycard (Project Sea) and the four Swedish hackathon books (HEI-SE17039, HEI-SE19026, HEI-SE20009, LOK-SE25008) today, whatever ships next as it lands. Use for what a number is, whether a figure can be quoted, which source answers it, why a guard exists, what reconciles and what does not, what is open with the servicer, or how to rerun a book's datasets. Reads that book's own write-up rather than re-deriving, so the measured figure and its caveats arrive together and the known traps are never re-learned. Carries two frameworks that generalise across books: which of the four sources can answer a question at all, and how far a given book actually got — a book that is clean is not necessarily reconciled. For BUILDING a benchmark for a new book, use benchmark-builder instead.
 tools: Bash, Read, Glob, Grep
 ---
 
@@ -25,6 +25,8 @@ one book transfers to another. Most do not.
 
 | **HEI-SE17039** | Sweden / SevenDay, one-off, Intrum systems 1062 + 2080. 2,095 loans; asset index before registration, warehouse after. Measured 2026-11-24. ⚠ See the Swedish caveat below. | `work/hackathon_dataset/individual_deal_dataset/HEI-SE17039/summary.md` |
 | **HEI-SE20009** | Sweden / Santander, one-off, system 2080 only. 15,514 cases. Same layout. Measured 2026-11-24. | `work/hackathon_dataset/individual_deal_dataset/HEI-SE20009/summary.md` |
+| **HEI-SE19026** | Sweden / Ikano Bank, one-off, systems 1062 + 2080 (491 moved loans). 9,574 loans; 97.21% of PAM on the sandbox build. Measured 2026-11-24. | `work/hackathon_dataset/individual_deal_dataset/HEI-SE19026/summary.md` |
+| **LOK-SE25008** | Sweden / Santander Consumer, Lokki deal, Intrum id **SE25018**, asset-index id SE25008. Systems 1062 + 2080 (4,039 moved loans). 9,755 loans; 97.28% of PAM on the sandbox build (7.51% on PROD). ⚠ Its tape is Intrum's own collection history (matches the warehouse on 97.9% of loan-months), so this deal splits at Intrum's acquisition month (Jun 2025), not by registration: tape up to then, warehouse after. Measured 2026-11-24. | `work/hackathon_dataset/individual_deal_dataset/LOK-SE25008/summary.md` |
 
 *Add a row per book as it ships — the row is the whole registration, because
 everything else follows the convention below.*
@@ -32,12 +34,16 @@ everything else follows the convention below.*
 ### ⚠ The Swedish books (hackathon) don't follow the Portuguese layout
 
 - **Different files.** They have no `<deal>_benchmark_*.csv`. Each deal is three queries plus
-  `summary.md`; both deals together are in `work/hackathon_dataset/final_dataset/` (`summary.md`,
+  `summary.md`; all four together are in `work/hackathon_dataset/final_dataset/` (`summary.md`,
   with the payments chart). `work/hackathon_dataset/README.md` is the map.
 - **Rung 3 on an unmerged build.** The warehouse payments come from the sandbox build
-  `DEV.HACKATHON`, which fixes two collection bugs that PROD still has. Both deals reconcile
-  there: SE17039 93.94% of PAM (48.45% on PROD today), SE20009 97.82%. Say "on the sandbox build"
-  whenever you quote them.
+  `DEV.HACKATHON`, which fixes two collection bugs that PROD still has. All four reconcile there:
+  - SE17039 93.94% of PAM (48.45% on PROD today);
+  - SE19026 97.21% (91.38% on PROD);
+  - SE20009 97.82% (97.63% on PROD);
+  - LOK-SE25008 97.28% (7.51% on PROD).
+
+  Say "on the sandbox build" whenever you quote them.
 - **SE20009's bridge is part inference.** 2,832 of its 13,587 bridged cases come from a
   borrower-and-balance score, not an id. 12.4% of owned cases are unbridged.
 - **Questions about Swedish deals other than these two** (why 557 of 639 don't reconcile,
@@ -403,12 +409,13 @@ user asks for a change in that place, in those words, in that message:
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
 | `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
+| `DEV.HACKATHON` on **brocc-sandbox** | the dbt build with Sweden's two collection fixes | **read only** — it's a dbt build, so a rebuild comes from `brocc-data`, never from a query here |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**
 PROD refuses a write — the role holds `SELECT` and `USAGE` only, so a mistake
 there fails loudly. The sandbox does not refuse: the `DEVELOPER` role carries
-write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX`
-**succeeds silently** and changes data someone else depends on. Never issue DDL
+write access, so a `CREATE`, `INSERT` or `DROP` against `DEV.ASSET_INDEX` or
+`DEV.HACKATHON` **succeeds silently** and changes data someone else depends on. Never issue DDL
 or DML there as a step toward something else.
 
 **"Explicitly stated" means the user named the target and the change.** A task
