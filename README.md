@@ -438,15 +438,20 @@ local-workspace/
 | `q(sql, connection="sandbox")` | Query `brocc-sandbox` instead of prod |
 | `reset()` | Reconnect after your login token expires |
 
-### The two connections
+### The connections
 
 | Name | Account | Role | Use for |
 |---|---|---|---|
 | `prod` *(default)* | brocc-prod | NPL_ANALYST | Reading production data |
-| `sandbox` | brocc-sandbox | PUBLIC | Scratch work, dbt dev schemas |
+| `sandbox` | brocc-sandbox | PUBLIC | Scratch work |
+| `dev` | brocc-sandbox | DEVELOPER | Reading sandbox dbt builds (e.g. the hackathon's `DEV.HACKATHON`); only once the data team has granted `DEVELOPER` |
 
 `prod` is the default, set by `SNOWFLAKE_CONNECTION` in
-[mise.toml](mise.toml).
+[mise.toml](mise.toml). `dev` is not in the config template: add it to
+`~/.snowflake/config.toml` by hand with warehouse `DEV_WH`. ⚠ `mise.toml`'s
+`SNOWFLAKE_WAREHOUSE = NPL_ANALYST_WH` doesn't exist on the sandbox and leaks
+into every connection, so pass it explicitly:
+`datalake.q(..., connection="dev", warehouse="DEV_WH")`.
 
 ---
 

@@ -29,11 +29,15 @@ LOK-SE25014 is SE25022. The workbook has an Intrum id column.
 |---|---:|---:|
 | Swedish deals we own | 639 | 1,914,527 |
 | Reconcile today | 53 | 261,743 |
-| Reconcile after our two fixes | 115 | 973,263 |
-| Pass today but fail once fixed | 20 | |
-| Still fail after our fixes | 524 | |
+| Reconcile after our two fixes | 82 | 671,883 |
+| Pass today but fail once fixed | 14 | |
+| Still fail after our fixes | 557 | |
 | Have a seller tape | 6 | 44,335 |
 | Have a seller tape with payment history | 3 | 31,502 |
+
+The three "after our fixes" rows are measured on the sandbox build with both fixes (`DEV.HACKATHON`, 23 Nov 2026),
+from `../bug_fixes_impact/RESULTS.md`. They replace the 18 Nov estimate (115 reconcile, 20 pass-then-fail, 524 still
+fail), which came from a rebuild that still double counted the April 2019 re-booking.
 
 Our two bugs, both in `int_npl_case_collection_intrum` in brocc-data:
 
@@ -46,10 +50,13 @@ Our two bugs, both in `int_npl_case_collection_intrum` in brocc-data:
 Intrum's data isn't wrong in either case, we read two fields wrongly. Questions 1 and 2 just check
 what those fields mean, so the fix is based on their definition rather than our guess.
 
-20 deals only reconcile today because the two bugs cancel out: one drops cash, the other double
-counts it. Once both are fixed those 20 don't reconcile either.
+14 deals only reconcile today because the two bugs cancel out: one drops cash, the other double
+counts it. Once both are fixed those 14 don't reconcile either.
 
 ## What's left once our bugs are fixed
+
+⚠ This table is the 18 Nov estimate. The measured breakdown of the 557 deals, by reason and by market, is in
+`../bug_fixes_impact/RESULTS.md`.
 
 | Reason | Deals | How sure |
 |---|---:|---|

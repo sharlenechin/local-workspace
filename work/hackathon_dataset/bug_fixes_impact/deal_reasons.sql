@@ -4,7 +4,8 @@
 --   ../intrum_clarifications/queries/3_reconcile_hackathon_build.sql. A deal that fails from purchase is then judged
 --   from Nov 2014 if bought before Oct 2014 (CAT's history starts then), otherwise from purchase again.
 -- Deal type: forward flow if any batch is Intrum's 'Ongoing', otherwise one-off.
--- Market: the sector of Intrum's product on the batch, bucketed as in work/workshop/queries/deals_seen_by_market.sql.
+-- Market: the sector of Intrum's product on the batch (original_product_name). Same group names as
+--   work/workshop/queries/deals_seen_by_market.sql, which buckets by seller from Atlas instead, so the two don't mix.
 -- Measured 24 Nov 2026: 82 reconcile from purchase; reasons match RESULTS.md's table.
 
 SET cat_start = '2014-11-01';

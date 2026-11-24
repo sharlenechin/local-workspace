@@ -35,6 +35,12 @@ is `brocc-data` changes 5 and 5b (backdate the case SCD, and make the collection
 join null-safe) — raised, not merged, and the recovery is unproven. `METHOD.md`
 has the step-by-step of what each pending change would move.
 
+⚠ **Sweden is the exception (2026-11-24).** Its two collection bugs (dropped
+1062 payments, double-counted 2080 payments) are fixed in the sandbox build
+`DEV.HACKATHON`, branch `hackathon-test`, which is **not merged**. Swedish
+post-registration payments come from there; the query-helper agent has the
+table names and traps.
+
 ⚠ **Three steps stay on RAW whatever lands.** Borrower type — PROD's
 `BORROWER_BK` is collapsed, one key shared by **24,559,290 cases**, and nothing
 in the change list fixes it. Exclusions — a per-deal decision, never a mart. The
@@ -43,6 +49,7 @@ feed lag — `NPL_COMMON` inherits it, so recent months still come from PAM.
 | `work/project-elsa-benchmark/FINDINGS.md` | **the worked example** — Portugal/Millennium, every figure measured |
 | `work/project-sea-benchmark/` | **the second book** — PT / **five originators**, one-off batches only. REBUILT 2026-10-01; the four `.sql` files are the current best adaptation of the templates and the only ones carrying step 8. `project_sea_benchmark_README.md` carries the caveats |
 | `work/.archive/2026-10-02-benchmark-investigation-trail/` | the eighteen investigation files from that build. **Moved out of `work/benchmark-dataset/post-registration-benchmark/` on 2026-10-02** — it is an audit trail, not working material. Open one only for the *working*, never the answer. Its two CSVs are an old schema; never quote them |
+| `work/hackathon_dataset/` | **the Swedish books** (HEI-SE17039, HEI-SE20009): asset index before registration, warehouse after, one deal per folder, stacked by `final_dataset/final_dataset.py`. `README.md` is the map. The recipe is below in **Books that start in the asset index** |
 | `work/portugal/` | the Portuguese seller census — who sold what, before a book is picked. ⚠ Two different cuts, not a file and its subset |
 | `work/italy/` | the two Italian books: legal phases, and settlement rates by age. ⚠ Their two servicers must never be added together |
 | `work/data-issues/intrum/escalations-portugal-millennium.md` | what a finished escalation write-up looks like |
@@ -480,6 +487,46 @@ CAT begins when the **servicer** registered the loan. The originating bank's own
 payment history is in neither CAT nor the warehouse. Say which one the user
 means before you build anything that depends on it.
 
+## Books that start in the asset index (the Swedish recipe, 2026-11-24)
+
+Use this layout when the seller's tape (the asset index) is in scope, not only
+Intrum's feeds. `work/hackathon_dataset/` is the worked example. Copy from it
+rather than from these notes, and read each deal's `summary.md` for what the
+result looked like.
+
+- **Three queries per deal, in `individual_deal_dataset/<deal>/`:**
+  - `accounts.sql` (prod): loan × month-end.
+  - `payments_pre_registration.sql` (prod): asset-index payments.
+  - `payments_post_registration.sql` (sandbox): warehouse payments, with the PAM check.
+
+  `individual_deal_dataset/deal_dataset.py` puts them together, because prod and
+  the sandbox cannot be joined in one query.
+- **Split by the loan's registration month, never by date.** Payments before
+  `DATE_TRUNC(MONTH, registration_date)` come from the asset index; that month
+  and after come from the warehouse. Assert zero overlap at loan × month before
+  shipping. A loan registered years before purchase (most of HEI-SE17039) has
+  warehouse payments before the deal's purchase date. That is correct: they are
+  different loans from the asset-index ones.
+- **The union contract:** every deal emits the same columns in the same order.
+  The pre and post payment queries share one column list. A column a deal can't
+  fill is `NULL`, never dropped. A new deal copies the final `SELECT`s from an
+  existing one and is added to `DEALS` in `final_dataset/final_dataset.py`.
+- **Bridge in this order, and record which way matched each case**
+  (`asset_index_match_method`):
+  1. the same id (`CASE_ID` = `CASE_BK`);
+  2. a moved loan's old case (1062 → 2080);
+  3. equal monthly payments (only possible when the tape's and the warehouse's
+     months overlap);
+  4. a scored borrower-and-balance match, with its rule written in the query.
+
+  Report the bridge % on cases owned, and name what's left unbridged.
+- **Reconcile against PAM by the house rule:** within 10% and paying in at
+  least 80% of PAM's months, from purchase to PAM's last complete month. For a
+  deal bought before Oct 2014, judge it from Nov 2014 (when CAT's Swedish history
+  starts).
+- Seller tapes in `asset_index_sharepoint/sorted/` hold personal data and are
+  never committed. Outputs (`.csv`/`.parquet`/`.png`) are git-ignored.
+
 ## Mistakes in how the query is written
 
 ⚠ **Properties of the DATA that cause wrong answers are the source checks
@@ -774,7 +821,7 @@ From `~/data-warehouse/CLAUDE.md`, and they are not negotiable:
 
 ## Which repos you may read
 
-Three sit side by side under `~/data-warehouse`, and you read **only** these two
+Four sit side by side under `~/data-warehouse`, and you read **only** these three
 outside this workspace:
 
 - **`brocc-data`** — the team's dbt/Airflow/dlt monorepo. The source of truth for
@@ -799,13 +846,14 @@ cite its figures. The four design findings worth keeping are in
 `work/.archive/2026-10-02-platinum/`.
 
 
-⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL THREE, NO EXCEPTIONS.** Unless the
+⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL FOUR, NO EXCEPTIONS.** Unless the
 user asks for a change in that place, in those words, in that message:
 
 | | What it is | You may |
 |---|---|---|
 | `brocc-data` | the team's dbt/Airflow/dlt monorepo | **read only** |
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
+| `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**

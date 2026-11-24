@@ -129,7 +129,8 @@ the year-by-year check shows how many of the 185 are the same.
 
 ## The same, by market and deal type
 
-Market is the sector of Intrum's product on the batch, bucketed as in `work/workshop/queries/deals_seen_by_market.sql`:
+Market is the sector of Intrum's product on the batch (`original_product_name`). The group names match
+`work/workshop/queries/deals_seen_by_market.sql`, but that query buckets by seller from Atlas, so the two don't mix:
 FS = Finance, Bank Loan, Credit Card; Non-FS = Telecom, Fixed Telephone, Utility, Mail Order, Retail sale;
 Unknown = Other (337 deals), Real Estate, Published, Transport, Insurance, or batches that disagree. FF = forward
 flow. Built by `deal_reasons.sql` and `reasons_by_market.py` (sandbox, 24 Nov 2026).

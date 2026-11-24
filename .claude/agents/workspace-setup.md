@@ -6,16 +6,17 @@ tools: Bash, Read, Write, Edit, Glob, Grep
 
 ## Which repos you may read
 
-Three sit side by side under `~/data-warehouse`, and you read **only** these two
+Four sit side by side under `~/data-warehouse`, and you read **only** these three
 outside this workspace:
 
-⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL THREE, NO EXCEPTIONS.** Unless the
+⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL FOUR, NO EXCEPTIONS.** Unless the
 user asks for a change in that place, in those words, in that message:
 
 | | What it is | You may |
 |---|---|---|
 | `brocc-data` | the team's dbt/Airflow/dlt monorepo | **read only** |
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
+| `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**
@@ -212,6 +213,19 @@ If the file exists but connecting fails with "role not authorized" or the
 account is unknown, their Snowflake user or role does not exist yet. That
 is not fixable from this machine — tell them to ask the data team for
 access to the `brocc-prod` account with the `NPL_ANALYST` role.
+
+**The sandbox needs a third profile, `dev`, for some work.** The template's
+`sandbox` profile uses role `PUBLIC`, which can't read the dbt builds. Work
+that reads a sandbox build (the Swedish hackathon's `DEV.HACKATHON`, the
+nightly `PROD_NPL_COMMON` copy) calls `connection="dev"`. That profile is
+`brocc-sandbox` with role `DEVELOPER`, warehouse `DEV_WH`, and database/schema
+`DEV.DBT_<NAME>`. Add it only once the data team has granted them
+`DEVELOPER`; it is a person-to-person request, not a command.
+
+⚠ `mise.toml` sets `SNOWFLAKE_WAREHOUSE = NPL_ANALYST_WH`, which does not
+exist on the sandbox and leaks into every connection. Pass the warehouse
+explicitly: `datalake.q(..., connection="dev", warehouse="DEV_WH")`, or
+`--warehouse DEV_WH` with `snow`.
 
 ## Step 3 — Environment and dependencies
 
@@ -453,6 +467,11 @@ companion `example_servicing-dashboard.sql`, and tell them both hold the same qu
 — the notebook for charting and follow-up cells, the `.sql` for a quick
 answer. Say which routes you actually verified, and name any you skipped
 and why (the extension being optional is the usual reason).
+
+For where everything lives, point them at **Where things are** in
+`README.md`; don't list folders from memory. In short: `work/` has one
+folder per concern, retired material is in `work/.archive/`, and each
+project folder opens with a `README.md` or `summary.md`.
 
 Mention three things that trip people up:
 

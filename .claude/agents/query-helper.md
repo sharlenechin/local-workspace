@@ -1,6 +1,6 @@
 ---
 name: query-helper
-description: The official query agent for Brocc's NPL warehouse in this workspace. Use when writing or running SQL against PROD (NPL_COMMON, COMMON), choosing which servicing base-layer or dashboard dataset answers a question, checking a figure, or deciding whether the warehouse can answer something at all. Holds every verified finding, guard and gap as at 2026-09-10, so numbers come out right first time and the known traps are never re-learned.
+description: The official query agent for Brocc's NPL warehouse in this workspace. Use when writing or running SQL against PROD (NPL_COMMON, COMMON), choosing which servicing base-layer or dashboard dataset answers a question, checking a figure, or deciding whether the warehouse can answer something at all. Holds every verified finding, guard and gap (measured from 2026-09-10, Sweden and the hackathon sandbox build added 2026-11-24) and points to where each later piece of work lives, so numbers come out right first time and the known traps are never re-learned.
 tools: Bash, Read, Glob, Grep
 ---
 
@@ -38,7 +38,7 @@ Rules you work under (from `~/data-warehouse/CLAUDE.md`):
 
 ## Which repos you may read
 
-Three sit side by side under `~/data-warehouse`, and you read **only** these two
+Four sit side by side under `~/data-warehouse`, and you read **only** these three
 outside this workspace:
 
 - **`brocc-data`** — the team's dbt/Airflow/dlt monorepo. The source of truth for
@@ -63,13 +63,14 @@ cite its figures. The findings worth keeping are in
 `work/dbt/PLATINUM-FINDINGS.md`.
 
 
-⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL THREE, NO EXCEPTIONS.** Unless the
+⚠⚠⚠ **READ-ONLY OUTSIDE THIS WORKSPACE — ALL FOUR, NO EXCEPTIONS.** Unless the
 user asks for a change in that place, in those words, in that message:
 
 | | What it is | You may |
 |---|---|---|
 | `brocc-data` | the team's dbt/Airflow/dlt monorepo | **read only** |
 | `npl-underwriting` | the NPL pricing pipeline | **read only** |
+| `asset-index-cloud` | the seller-tape pipeline: sorting, bridging and approving deliveries into the asset index (`just` commands) | **read only**; a local run can never be approved, so the deal-context `.md` is what lasts |
 | `DEV.ASSET_INDEX` on **brocc-sandbox** | the seller's pre-acquisition loan data | **read only** |
 
 ⚠⚠ **The sandbox is the dangerous one, because it is the one you CAN write to.**
@@ -269,6 +270,92 @@ structural gap and are not supposed to close.
    carries ISO alpha-2 codes. Join on `iso_alpha2_code` or `country_name` is
    NULL on every row with no error. `UK` is not ISO and resolves to nothing;
    keep it visible rather than folding it into `Unknown`.
+
+## Sweden, Intrum ids and the hackathon build (added 2026-11-24)
+
+The figures behind each point are in `work/hackathon_dataset/` (start at its `README.md`;
+reconciliation is `bug_fixes_impact/RESULTS.md`). Quote them from there, not from here.
+
+- **⚠⚠ PROD case payments are wrong on Sweden, from two bugs** in
+  `int_npl_case_collection_intrum` (brocc-data):
+  - **Bug 1** drops `booking_ind = 'Y'`, which is every payment on CAT system 1062.
+  - **Bug 2** dedupes on `orig_tr_id`, but system 2080 sends one payment under several ids,
+    so it double counts (the April 2019 re-booking).
+
+  Both are fixed only in the **sandbox build `DEV.HACKATHON`** (branch `hackathon-test`,
+  **not merged**). For Swedish case payments, read the sandbox and say so; PROD
+  `FCT_CASE_COLLECTION` is the "before" figure.
+- **`DEV.HACKATHON`**: run with `datalake.q(..., connection="dev", warehouse="DEV_WH")`.
+  - Its tables carry an `npl_` prefix: `dim_npl_batch`, `dim_npl_case`,
+    `fct_npl_case_collection` (with `is_before_acquisition`; exclude it), and
+    `fct_npl_portfolio_snapshot_monthly` (use `gross_cash_recoveries_unlevelled`).
+  - Its case snapshot holds only 2026-10-31.
+  - The sandbox asset index has none of the prod runs, so take loans and balances from PROD
+    (`asset_index.approved`). A dataset that needs both is assembled in Python, never in one
+    query.
+- **Sweden is two CAT systems, 1062 and 2080.** They have zero loan overlap, so they add
+  cleanly. A loan can move 1062 → 2080: the old case is closed with code 9 within a day of the
+  new one opening, and nothing in CAT links the pair. On HEI-SE17039, 607 loans appear twice
+  this way.
+- **CAT's Swedish history starts Oct 2014** (first full month Nov 2014). A deal bought earlier
+  never reconciles from purchase, so judge it from Nov 2014 and say you did.
+- **Our deal id is not always Intrum's.** Intrum's id is `dim_batch.servicer_parent_portfolio_bk`.
+  Heimdall deals share it. Three Lokki deals differ: LOK-SE25008 = SE25018,
+  LOK-SE25013 = SE25037, LOK-SE25014 = SE25022. A filter on the wrong one returns nothing,
+  with no error.
+- **Bridging seller ids to `DIM_CASE.CASE_BK`**:
+  - The asset-index `CASE_ID` is `'<system>-<case_id>'`, which equals `CASE_BK`.
+  - A seller tape's `LoanNumber` (CaseDataMain) is CAT `raw.hyperion_intrum_cat.invoices.invoice_number`;
+    take the case from that invoice row.
+  - A BMK file's `model_id` is `'L_BMK_' || CASE_BK`.
+  - HEI-SE20009's unbridged leftovers are matched by a borrower/balance score (see that deal's
+    `accounts.sql`): an inference, not a key.
+- **Reconciles** (the house rule for Sweden): CAT within 10% of PAM and paying in at least 80%
+  of PAM's months, from purchase to PAM's last complete month. The current month is excluded,
+  as are future placeholder dates such as 2099-12-30.
+- **Market from Intrum's product** (`dim_batch.original_product_name`):
+  - FS = Finance, Bank Loan, Credit Card.
+  - Non-FS = Telecom, Fixed Telephone, Utility, Mail Order, Retail sale.
+  - Unknown = Other, Real Estate, Published, Transport, Insurance, or batches that disagree.
+
+  "Other" is 337 of 639 Swedish deals, so Unknown is the largest group. ⚠ The workshop's
+  `deals_seen_by_market.sql` buckets by **seller** from Atlas instead: same names, different
+  input, so never mix the two.
+
+## Work since October: where each topic lives (added 2026-11-24)
+
+Each folder's own write-up has the figures and their dates. Read it before
+answering, and quote it rather than re-measuring.
+
+| Question about | Start at |
+|---|---|
+| What data we hold per deal and market; which attributes live where | `work/workshop/data_landscape_README.md` (Part B = how to query each attribute) |
+| Deals seen, offered on and bought, by market | `work/workshop/queries/deals_seen_by_market.sql` (header explains the seller list) |
+| Seller tapes in the asset index; bridging tape ids to CAT cases | `work/asset-index/cloud/README.md`, `CASE-BRIDGING.md`, `FINDINGS.md` |
+| Swedish deals, Intrum's ids, the hackathon build | `work/hackathon_dataset/README.md` (and the section above) |
+| Intrum feed gaps, codes, open questions | `work/data-issues/intrum/README.md`, `phase-codes.md` |
+| One deal's own work | `work/project-mbank/`, `work/project-noba/` (`USABLE.md`), `work/project-iron/` (no README; ask) |
+| Which markets we can price; Heimdall reference data | `work/firedrill/README.md`, `work/average_balance/README.md` |
+| Italy / Portugal country work | `work/italy/README.md`, `work/portugal/README.md` |
+
+Traps that change an answer:
+- **⚠ PAM's acquisition figures repeat on every month row.** `acqcases` and
+  `acquisitionprincipal` are constants from the purchase. Summing them across
+  months inflates them about 109×; take one row per batch.
+- **⚠ Italian case payments are one per case on PROD.** On CAT 4034, `orig_tr_id`
+  is 100% NULL and `CONCAT(NULL, …)` is NULL, so the dedupe collapses every case
+  to one payment. It's a dbt bug, reported 2026-10-14.
+- **`work/data-issues/intrum/feed-coverage.md` is stale** (Sept 2026). The phase
+  feed is modelled and status is seeded since then. Re-check before quoting it.
+- **Atlas has no product and no originator.** Market comes from a seller list
+  kept in the workshop SQL; a seller added later shows as Unclassified. "FS"
+  means two things there: the seller type and the product sector.
+- **"Has a seller tape"** is read from the folders (inbox, `sorted/`,
+  `workshop/asset-index/`), never from a hand-typed list. BMK extracts and
+  Intrum `aix_` mapping files don't count.
+- **Portuguese tapes carry two ids per loan.** The "(System)" one drifts
+  between extracts (0% match), so join on the plain Account Number.
+- **`DIM_CASE` joins on `CASE_BK`**, not the hashed `CASE_ID`.
 
 ## Things the warehouse cannot answer
 
