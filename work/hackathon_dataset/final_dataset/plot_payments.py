@@ -3,7 +3,7 @@
     uv run python work/hackathon_dataset/final_dataset/plot_payments.py
 
 Bars are the Asset Index payments before registration, from output/ (final_dataset.py writes it, then calls this).
-Lines: this dataset's warehouse payments (sandbox build), prod's case payments today, and Intrum's PAM for the
+Lines: every warehouse payment on the deal at any date (sandbox build), prod's case payments today, and Intrum's PAM for the
 whole deal (sandbox build). Each loan switches from Asset Index to warehouse in its own registration month; the dashed
 line marks the month most loans registered. LOK-SE25008 switches at Intrum's acquisition month instead.
 """
@@ -44,34 +44,35 @@ def draw(ax, deal: str, payments: pd.DataFrame, accounts: pd.DataFrame) -> None:
     p = payments[payments.deal_id == deal]
     # Intrum's id, not the deal name: LOK-SE25008 is SE25018 at Intrum.
     intrum_id = p.intrum_id.dropna().iloc[0]
-    current_month = pd.Timestamp.today().to_period("M").to_timestamp()
 
     tape = p[p.payment_source == "asset_index"]
-    warehouse = p[(p.payment_source == "warehouse") & (p.payment_date < current_month)]
     tape_m = monthly(tape.payment_amount, tape.payment_date)
-    warehouse_m = monthly(warehouse.payment_amount, warehouse.payment_date)
+    # Every warehouse payment on the deal at any date, not only the dataset's months after the split, so the
+    # line overlays the bars wherever the warehouse has the same months.
+    wh = datalake.q(HERE / "monthly_warehouse.sql", lower=True, portfolio_id=intrum_id, **SANDBOX)
+    warehouse_m = pd.Series(wh.collected.astype(float).values / 1e6, index=pd.to_datetime(wh.month_end))
     pam = datalake.q(HERE / "monthly_pam.sql", lower=True, portfolio_id=intrum_id, **SANDBOX)
     prod = datalake.q(HERE / "monthly_prod_collections.sql", lower=True, portfolio_id=intrum_id)
     # Each loan switches from Asset Index to warehouse in its own registration month; the line marks the month most did.
     loans = accounts[accounts.deal_id == deal].drop_duplicates("model_id").warehouse_registration_date.dt.to_period("M")
     busiest = loans.value_counts()
-    registered = busiest.index[0].to_timestamp()
-    label = "Registration Date"
+    markers = [(busiest.index[0].to_timestamp(), "Registration Date")]
     if deal in SPLIT_AT_ACQUISITION:
-        # The whole deal switches at the acquisition month, so the line marks that instead.
+        # The whole deal switches at the acquisition month, so that gets a line of its own.
         acquired = p.warehouse_vs_pam_compared_from.dropna().iloc[0]
-        registered, label = pd.Timestamp(acquired).to_period("M").to_timestamp(), "Acquisition Date"
+        markers.append((pd.Timestamp(acquired).to_period("M").to_timestamp(), "Acquisition Date"))
 
     # Bars sit on the month they belong to, about a month wide with a thin gap.
     ax.bar(tape_m.index - pd.to_timedelta(14, unit="D"), tape_m.values, width=26, color=TAPE,
            label="Asset Index, before registration (LOK-SE25008: before acquisition)")
     ax.plot(pam.month_end, pam.pam / 1e6, color=PAM, linewidth=3, label="PAM, whole deal (sandbox build)")
     ax.plot(warehouse_m.index, warehouse_m.values, color=WAREHOUSE, linewidth=1.5,
-            label="Warehouse, this dataset (sandbox build, both fixes)")
+            label="Warehouse, all payments (sandbox build, both fixes)")
     # Drawn on top: on a deal neither bug touches it sits exactly on the dataset's line.
     ax.plot(prod.month_end, prod.collected / 1e6, color=PROD, linewidth=1.8, linestyle=":", zorder=5,
             label="Warehouse on prod today (both bugs)")
-    ax.axvline(registered, color=INK, linewidth=1, linestyle="--")
+    for when, _ in markers:
+        ax.axvline(when, color=INK, linewidth=1, linestyle="--")
     # Headroom above the tallest series, so the label never sits on a bar or a line.
     top = max(tape_m.max(), warehouse_m.max(), pam.pam.max() / 1e6, prod.collected.max() / 1e6)
     ax.set_ylim(0, top * 1.22)
@@ -80,9 +81,10 @@ def draw(ax, deal: str, payments: pd.DataFrame, accounts: pd.DataFrame) -> None:
     firsts = [s[s > 0].index.min() for s in (tape_m, warehouse_m) if (s > 0).any()]
     firsts += [d.month_end[d[c] > 0].min() for d, c in ((pam, "pam"), (prod, "collected")) if (d[c] > 0).any()]
     ax.set_xlim(left=pd.Timestamp(min(firsts)) - pd.DateOffset(months=6))
-    ax.text(registered, 0.985, f" {label}: {registered:%b %Y}", transform=ax.get_xaxis_transform(),
-            va="top", ha="left", color=INK, fontsize=9,
-            bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5})
+    for when, label in markers:
+        ax.text(when, 0.985, f" {label}: {when:%b %Y}", transform=ax.get_xaxis_transform(),
+                va="top", ha="left", color=INK, fontsize=9,
+                bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5})
 
     ax.set_title(deal, loc="left", color=INK, fontsize=11, fontweight="bold")
     ax.set_ylabel("SEK m per month", color=MUTED)

@@ -17,11 +17,11 @@ Warehouse vs PAM is the warehouse's total as a share of Intrum's monthly report 
 
 ![Payments by month, one row per deal](payments_by_month.png)
 
-Bars are the Asset Index (seller tape) payments before each loan's registration month; lines are from the registration month on. The dashed line is the month the most loans registered with Intrum.
+Bars are the Asset Index (seller tape) payments the dataset uses: before each loan's registration month. The black line is every warehouse payment on the deal (sandbox build) at any date, so it overlays the bars wherever the warehouse has the same months; the dataset uses it only from each loan's registration month. The dashed line is the month the most loans registered with Intrum. HEI-SE20009 has no black line before Jul 2020 because the warehouse holds nothing on it before its cases registered.
 
-**LOK-SE25008 is split at Intrum's acquisition month (Jun 2025), not by registration.** Intrum was already collecting its loans for the seller from 2016, and its tape is that collection history (it matches the warehouse to the öre on 97.9% of loan-months). Split by registration, almost all of it would have been replaced by the warehouse. So the tape is used up to the purchase and the warehouse from it, and the dashed line on its chart marks the acquisition month.
+**LOK-SE25008 is split at Intrum's acquisition month (Jun 2025), not by registration.** Intrum was already collecting its loans for the seller from 2016, and its tape is that collection history (it matches the warehouse to the öre on 97.9% of loan-months). Split by registration, almost all of it would have been replaced by the warehouse. So the tape is used up to the purchase and the warehouse from it, and its chart has a second dashed line at the acquisition month. Before it, the black line sits on the bars: the same payments from both sources.
 
-Why some deals have warehouse payments before the dashed line: Intrum was already collecting part of the deal for the seller before we bought it, and each loan registered with Intrum when it went to collection. Each loan switches from Asset Index to warehouse in its own registration month, so where bars and line overlap they are different loans, never the same payment twice. The current month is left out of the lines.
+Why some deals have warehouse payments before the dashed line: Intrum was already collecting part of the deal for the seller before we bought it, and each loan registered with Intrum when it went to collection. Each loan switches from Asset Index to warehouse in its own registration month, so where bars and line overlap on HEI-SE17039 they are different loans. On LOK-SE25008 they are the same payments, drawn from both sources on the chart only; the dataset never holds a payment twice. The current month is left out of the lines.
 
 | Deal | Bought | Loans registered with Intrum before we bought | First registration |
 |---|---|---:|---|
