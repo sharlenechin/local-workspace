@@ -402,7 +402,7 @@ local-workspace/
    │  ├─ cloud-agent-check/     # cleaned approved Portuguese tapes, for the agent
    │  └─ sharepoint/            # SharePoint deliveries (data, gitignored) + checks/
    ├─ workshop/                 # the Data Landscape notebook and its queries
-   ├─ hackathon/                # Sweden status notebook + intrum_clarifications/
+   ├─ hackathon_dataset/        # Swedish hackathon: deal datasets, final dataset, Intrum clarifications
    ├─ firedrill/                # which markets we can price
    ├─ average_balance/          # Heimdall reference-data check
    ├─ portugal/, italy/         # country work

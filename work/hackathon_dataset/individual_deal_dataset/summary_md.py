@@ -53,7 +53,7 @@ def render(s: dict) -> str:
         overview.append(["Loans we own", _n(own["loans_owned"])])
     overview += [
         [
-            "Cases bridged to the seller's tape",
+            "Cases bridged to the Asset Index",
             f"**{_pct(bridge['bridged_total']['pct'])}** ({_n(bridge['bridged_total']['cases'])})",
         ],
         [
@@ -80,7 +80,7 @@ def render(s: dict) -> str:
         "Reconciles means the warehouse total is within 10% of PAM's and has payments in at least 80% of "
         f"PAM's months, from purchase ({fixed['months']}).",
         "",
-        "## How the seller's tape bridges to the cases we own",
+        "## How the Asset Index bridges to the cases we own",
         "",
     ]
     ways = [
@@ -96,10 +96,10 @@ def render(s: dict) -> str:
         if key in bridge:
             v = bridge[key]
             count = v.get("cases", v.get("rows"))
-            out += [f"Tape rows not matched to any case we own: {_n(count)}.", ""]
+            out += [f"Asset Index rows not matched to any case we own: {_n(count)}.", ""]
     if "loans_on_tape" in bridge:
         v = bridge["loans_on_tape"]
-        out += [f"Loans with a tape row: {_n(v['loans'])} of {_n(v['of_loans_owned'])} ({_pct(v['pct'])}).", ""]
+        out += [f"Loans in the Asset Index: {_n(v['loans'])} of {_n(v['of_loans_owned'])} ({_pct(v['pct'])}).", ""]
 
     pay = s["payments_since_purchase"]
     out += [f"## Payments since purchase ({pay['months']}, {pay['currency']})", ""]
@@ -138,7 +138,7 @@ def render(s: dict) -> str:
         by = [[system, _n(x["loan_months"]), _n(x["matched"]), _pct(x["matched_pct"])] for system, x in v["by_system_of_current_case"].items()]
         by.append(["**all**", f"**{_n(v['loan_months_with_a_payment'])}**", f"**{_n(v['matched'])}**", f"**{_pct(v['matched_pct'])}**"])
         out += [
-            "## Monthly payments: tape vs warehouse (sandbox build)",
+            "## Monthly payments: Asset Index vs warehouse (sandbox build)",
             "",
             f"Counted over {v['what']}.",
             "",

@@ -13,7 +13,7 @@ purchase month to PAM's last month (Oct 2026).
 ## Five key deals
 
 PAM is the same in both columns (Intrum's report doesn't change); only CAT moves.
-PAM here is `gross_cash_recoveries`, as in `summary.yaml`; the 639-deal reconciliation below uses the
+PAM here is `gross_cash_recoveries`, as in each deal's `summary.md`; the 639-deal reconciliation below uses the
 unlevelled figure, so a few deals read slightly differently there (LOK-SE25013: 81.1% here, 81.9% below).
 
 | Deal (Intrum id) | Source | Before (SEK) | After (SEK) | Before vs PAM | After vs PAM | Paying cases before → after |
@@ -126,6 +126,32 @@ The figure to quote is **82 reconcile from purchase, 331 from Nov 2014**. Next t
 deals where CAT is short of PAM even after Nov 2014. On LOK-SE25013 the shortfall is the first months
 after onboarding (CAT has fewer payments than PAM while the book was loaded, and our model loses none);
 the year-by-year check shows how many of the 185 are the same.
+
+## The same, by market and deal type
+
+Market is the sector of Intrum's product on the batch, bucketed as in `work/workshop/queries/deals_seen_by_market.sql`:
+FS = Finance, Bank Loan, Credit Card; Non-FS = Telecom, Fixed Telephone, Utility, Mail Order, Retail sale;
+Unknown = Other (337 deals), Real Estate, Published, Transport, Insurance, or batches that disagree. FF = forward
+flow. Built by `deal_reasons.sql` and `reasons_by_market.py` (sandbox, 24 Nov 2026).
+
+| Why it doesn't reconcile | FS one-off | Non-FS one-off | Unknown one-off | FS FF | Non-FS FF | Unknown FF | All |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Bought before Oct 2014; matches PAM from Nov 2014 on | 61 | 55 | 122 | 3 | 4 | 4 | 249 |
+| Bought before Oct 2014; still below 90% from Nov 2014 | 15 | 26 | 77 | 2 | 0 | 0 | 120 |
+| No cases in CAT (bought 2001-2010) | 6 | 1 | 77 | 0 | 0 | 0 | 84 |
+| Bought after Oct 2014; CAT below 90% | 7 | 22 | 21 | 3 | 8 | 4 | 65 |
+| No CAT payments, though the deal has cases | 0 | 0 | 24 | 0 | 0 | 0 | 24 |
+| CAT above 110% | 0 | 0 | 8 | 0 | 0 | 0 | 8 |
+| Within 10%, but CAT missing some months | 0 | 0 | 6 | 0 | 0 | 0 | 6 |
+| No PAM in the window | 0 | 0 | 1 | 0 | 0 | 0 | 1 |
+| **Total not reconciling** | **89** | **104** | **336** | **8** | **12** | **8** | **557** |
+| Reconcile from purchase | 18 | 10 | 21 | 21 | 11 | 1 | 82 |
+| **All Swedish deals** | **107** | **114** | **357** | **29** | **23** | **9** | **639** |
+
+Solid: the large groups and the one-off / forward-flow split match the table above exactly. Shaky: 2 of the 639
+deals land in a different small group (No cases 84 not 83, No CAT payments 24 not 23, No PAM 1 not 3); the rule
+used for the table above wasn't saved, and these two edge cases can't be told apart from it. Unknown is the
+largest market because Intrum labels most older books "Other".
 
 ## The 14 deals that reconciled before but not now
 

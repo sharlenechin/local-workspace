@@ -96,7 +96,7 @@ def main() -> None:
                 "whole deal; FCT_CASE_COLLECTION, built from CAT",
             ),
             "asset_index": source_entry(
-                "asset_index", "the seller's tapes; their payments end in May 2020, before purchase"
+                "asset_index", "Asset Index (seller tapes); its payments end in May 2020, before purchase"
             ),
             "note": (
                 "vs_portfolio_snapshot_pct is the source's total above (+) or below (-) the "
@@ -116,7 +116,7 @@ def main() -> None:
             "same_id": {
                 "cases": same_id,
                 "pct": pct(same_id, owned),
-                "how": "the tape's case id equals the warehouse case id (DIM_CASE.CASE_BK)",
+                "how": "the Asset Index case id equals the warehouse case id (DIM_CASE.CASE_BK)",
             },
             "borrower_and_balance": {
                 "cases": by_borrower,
@@ -131,7 +131,7 @@ def main() -> None:
                 "cases": 0,
                 "pct": 0.0,
                 "how": (
-                    "not possible: the tape's payments end in May 2020 and the first case "
+                    "not possible: the Asset Index payments end in May 2020 and the first case "
                     "registered in July 2020, so no month is in both."
                 ),
             },
@@ -147,7 +147,7 @@ def main() -> None:
             "not_bridged": {
                 "cases": owned - same_id - by_borrower,
                 "pct": pct(owned - same_id - by_borrower, owned),
-                "note": "needs Intrum's mapping from the tape's SE_A/SE_C ids to their case numbers",
+                "note": "needs Intrum's mapping from the Asset Index SE_A/SE_C ids to their case numbers",
             },
             "tape_rows_not_matched": {
                 "rows": len(tape_ids - tape_used),

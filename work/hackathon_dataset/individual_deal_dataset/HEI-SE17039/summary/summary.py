@@ -158,12 +158,12 @@ def main() -> None:
             "via_case_bk": {
                 "cases": len(on_tape_direct),
                 "pct": pct(len(on_tape_direct), len(cases_owned)),
-                "how": "the tape's case id equals the warehouse case id (DIM_CASE.CASE_BK)",
+                "how": "the Asset Index case id equals the warehouse case id (DIM_CASE.CASE_BK)",
             },
             "via_moved_loan_link": {
                 "cases": len(on_tape_via_move),
                 "pct": pct(len(on_tape_via_move), len(cases_owned)),
-                "how": "old 1062 case of a moved loan whose new 2080 case is on the tape",
+                "how": "old 1062 case of a moved loan whose new 2080 case is in the Asset Index",
             },
             "via_payment_history": {
                 "cases": 0,
